@@ -4,8 +4,17 @@
 
 > **Unofficial.** Encore is an independent open-source project. It is not affiliated with, endorsed by or sponsored by Google, YouTube or Apple. "YouTube" and "YouTube Music" are trademarks of Google LLC. You need your own YouTube Music account; Premium is respected (ad-free, higher-quality audio).
 
-<!-- Screenshots: add images to docs/screenshots/ and reference them here, e.g.
-![Home](docs/screenshots/home.png) -->
+![Now Playing](docs/screenshots/nowplaying.jpg)
+
+| Artist | Album |
+| --- | --- |
+| ![Artist page](docs/screenshots/artist.jpg) | ![Album page](docs/screenshots/album.jpg) |
+
+| Search | Settings |
+| --- | --- |
+| ![Search](docs/screenshots/search.jpg) | ![Appearance settings](docs/screenshots/settings.jpg) |
+
+<sub>Screenshots were taken signed out with sample content. Artwork and artist names belong to their respective owners.</sub>
 
 ## Features
 

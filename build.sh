@@ -5,6 +5,7 @@
 #   ./build.sh --run            build and open it
 #   ./build.sh --install        build and copy it to /Applications
 #   APP_NAME="My Name" ./build.sh --install   use a different app name
+#   BUNDLE_ID=com.example.encore ./build.sh   use a different bundle ID (separate settings/sign-in)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -32,6 +33,7 @@ cp "$BIN" "$APP/Contents/MacOS/Encore"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 plutil -replace CFBundleName -string "$APP_NAME" "$APP/Contents/Info.plist"
 plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP/Contents/Info.plist"
+if [ -n "${BUNDLE_ID:-}" ]; then plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"; fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc signature with the hardened runtime and the sandbox entitlements.
