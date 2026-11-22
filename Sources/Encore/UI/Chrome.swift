@@ -217,9 +217,13 @@ struct SettingsSidebar: View {
                     withAnimation(.easeInOut(duration: 0.2)) { model.settingsSection = s }
                 }
             }
-            Spacer()
         }
         .padding(.horizontal, 10).padding(.vertical, 14)
+        // The panel hugs these rows instead of running the full window height.
+        .background(GeometryReader { g in
+            Color.clear.preference(key: SidebarContentHeight.self, value: g.size.height)
+        })
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 

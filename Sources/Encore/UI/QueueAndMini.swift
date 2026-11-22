@@ -3,8 +3,27 @@ import SwiftUI
 // MARK: - Playing Next (queue inspector)
 
 struct QueueView: View {
+    /// The tallest the panel may get; it is shorter when there's less to show.
+    var maxHeight: CGFloat = .infinity
     @EnvironmentObject var player: PlayerController
     @State private var tab = 0
+
+    // Fixed row metrics (QueueRow: 36 pt artwork + 8 pt padding + 2 pt insets,
+    // plus the list's spacing), used to size the panel to its content.
+    private static let pickerHeight: CGFloat = 56
+    private static let rowHeight: CGFloat = 50
+    private static let headerHeight: CGFloat = 44
+    private static let bottomPadding: CGFloat = 14
+
+    private var contentHeight: CGFloat {
+        if tab == 0 {
+            var h = Self.pickerHeight + Self.headerHeight + Self.bottomPadding
+            if player.current != nil { h += Self.headerHeight + Self.rowHeight }
+            h += player.upNext.isEmpty ? 34 : CGFloat(player.upNext.count) * Self.rowHeight
+            return h
+        }
+        return Self.pickerHeight + Self.bottomPadding + max(120, CGFloat(player.history.count) * Self.rowHeight)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,6 +31,8 @@ struct QueueView: View {
                 .padding(12)
             if tab == 0 { upNext } else { history }
         }
+        .frame(height: max(180, min(maxHeight, contentHeight)))
+        .animation(.easeInOut(duration: 0.25), value: contentHeight)
     }
 
     private var upNext: some View {
@@ -193,7 +214,7 @@ struct MenuBarPlayerView: View {
             VolumeControl()
             Divider()
             HStack {
-                Button { NSApp.activate(ignoringOtherApps: true); openWindow(id: "main") } label: {
+                Button { WindowOpener.open = WindowOpener.open ?? openWindow; WindowOpener.showMain() } label: {
                     Label("Open \(AppInfo.name)", systemImage: "macwindow")
                 }
                 Spacer()

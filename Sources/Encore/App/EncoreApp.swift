@@ -73,6 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Dock icon clicked. AppKit's default does nothing here because the hidden
+    /// player's off-screen "parking" window always counts as a visible window,
+    /// so a minimised (or closed) main window never came back. Handle it ourselves.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        WindowOpener.showMain()
+        return false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { PlayerController.shared.save() }
     }
@@ -251,4 +259,30 @@ enum MenuBarIcon {
         img.isTemplate = true
         return img
     }()
+}
+
+
+/// Brings the main window back from AppKit code (Dock clicks): restores it when it's
+/// minimised or hidden, and reopens it through SwiftUI when it was closed.
+@MainActor
+enum WindowOpener {
+    /// SwiftUI's openWindow action, captured from the main window's view.
+    static var open: OpenWindowAction?
+
+    static var mainWindow: NSWindow? {
+        NSApp.windows.first { w in
+            (w.identifier?.rawValue.hasPrefix("main") == true || w.title == AppInfo.name)
+                && w.styleMask.contains(.titled)
+        }
+    }
+
+    static func showMain() {
+        if let w = mainWindow, w.isVisible || w.isMiniaturized {
+            if w.isMiniaturized { w.deminiaturize(nil) }
+            w.makeKeyAndOrderFront(nil)
+        } else {
+            open?(id: "main")
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }

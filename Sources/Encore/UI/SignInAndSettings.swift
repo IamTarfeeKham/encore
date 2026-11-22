@@ -247,7 +247,8 @@ struct SettingsView: View {
                     .id(section)
                     .transition(.opacity)
             }
-            .frame(maxWidth: 720, alignment: .leading)
+            // Fills whatever width is left beside the sidebar and queue (no fixed cap).
+            .frame(maxWidth: .infinity, alignment: .leading)
             .pagePadding()
             .frame(maxWidth: .infinity, alignment: .leading)
         }

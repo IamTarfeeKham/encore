@@ -107,6 +107,10 @@ struct ShelvesPage: View {
             let selected = chip?.title == c.title
             Button(c.title) { chip = selected ? nil : c }
                 .buttonStyle(ChipStyle(selected: selected, fill: true))
+                // A floor on each chip's width: when they can't all get it, the
+                // single-row layout no longer "fits" and the swipeable row is used
+                // instead of squeezing labels into "Roma…".
+                .frame(minWidth: 104)
         }
     }
 
@@ -416,7 +420,8 @@ struct ArtistView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, pageInset).padding(.bottom, pageInset)
+                    // Room for the floating player bar, like every other page.
+                    .padding(.horizontal, pageInset).padding(.bottom, PageInsets.bottom)
                 }
             }
             .navigationTitle(page.name)

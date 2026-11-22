@@ -35,11 +35,13 @@ struct ContentView: View {
                             }
                         }
                     if model.showQueue {
-                        QueueView()
+                        // Hugs its content (a short queue gets a short panel), up to the space available.
+                        QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
                             .frame(width: 320)
                             .glassPanel(20)
                             .padding(.top, Self.topBarHeight + 6)
                             .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
+                            .frame(maxHeight: .infinity, alignment: .top)
                             .transition(.move(edge: .trailing))
                     }
                 }
@@ -124,6 +126,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.3), value: model.showQueue)
         .animation(.spring(duration: 0.35), value: model.toast)
         .onReceive(NotificationCenter.default.publisher(for: .openMiniPlayer)) { _ in openWindow(id: "mini") }
+        .onAppear { WindowOpener.open = openWindow }
         .animation(.spring(duration: 0.25, bounce: 0.15), value: search.visible)
         .sheet(isPresented: $model.showSignIn) { SignInView().appAccent() }
         .sheet(isPresented: $model.editingSidebar) { EditSidebarView().appAccent() }
@@ -197,7 +200,15 @@ struct DetailPane: View {
 
 // MARK: - Sidebar
 
+/// The sidebar's natural content height, reported up to ResizableSidebar.
+struct SidebarContentHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct SidebarView: View {
+    /// Height of the "Customise" bar under the list.
+    static let footerHeight: CGFloat = 40
     @EnvironmentObject var model: AppModel
     @StateObject private var store = SidebarStore.shared
 
@@ -217,6 +228,10 @@ struct SidebarView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 10)
+                    // Natural height (+ the Customise bar below) so the panel can hug it.
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: SidebarContentHeight.self, value: g.size.height + SidebarView.footerHeight)
+                    })
                 }
                 .safeAreaInset(edge: .bottom) {
                     HStack {
@@ -330,7 +345,7 @@ struct SidebarRow: View {
             } else {
                 Artwork(url: artwork, cornerRadius: round ? 10 : 4, size: 20).frame(width: 20, height: 20)
             }
-            Text(title).font(.system(size: roomy ? 13.5 : 13, weight: selected ? .semibold : .regular)).lineLimit(1)
+            Text(title).font(.system(size: roomy ? 13.5 : 13, weight: selected ? .semibold : .regular)).lineLimit(1).minimumScaleFactor(0.85)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, roomy ? 10 : 8).padding(.vertical, roomy ? 9 : 6)
@@ -594,18 +609,17 @@ struct NewPlaylistSheet: View {
 /// The sidebar panel with drag handles: right edge sets the width, bottom edge
 /// the height. Sizes are remembered.
 struct ResizableSidebar: View {
-    // Read once; NOT observed. While dragging, the live size is local state, and the
-    // preference is written once when the drag ends. (Writing Prefs on every drag
-    // event re-rendered every view that observes Prefs, e.g. all glass panels, and
-    // wrote to disk each time: that was the lag.)
+    // Width: dragged by the user. Read once; NOT observed. The live width is local
+    // state while dragging and the preference is written once when the drag ends
+    // (writing Prefs on every drag event re-rendered every glass panel: lag).
+    // Height: follows the sidebar's content, up to the space available.
     @State private var width: Double = Prefs.shared.sidebarWidth
-    @State private var heightFraction: Double = Prefs.shared.sidebarHeight
     @State private var startWidth: Double?
-    @State private var startHeight: Double?
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         GeometryReader { g in
-            let height = max(240, g.size.height * heightFraction)
+            let height = contentHeight > 0 ? min(g.size.height, max(160, contentHeight)) : g.size.height
             SidebarView()
                 .frame(width: width, height: height)
                 .glassPanel(20)
@@ -621,22 +635,12 @@ struct ResizableSidebar: View {
                             }
                             .onEnded { _ in startWidth = nil; Prefs.shared.sidebarWidth = width })
                 }
-                .overlay(alignment: .bottom) {
-                    ResizeHandle(cursor: .resizeUpDown)
-                        .frame(height: 18)
-                        .offset(y: 9)
-                        .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { v in
-                                if startHeight == nil { startHeight = heightFraction }
-                                var t = Transaction(); t.disablesAnimations = true
-                                withTransaction(t) {
-                                    heightFraction = min(1, max(0.35, (startHeight ?? 1) + v.translation.height / max(g.size.height, 1)))
-                                }
-                            }
-                            .onEnded { _ in startHeight = nil; Prefs.shared.sidebarHeight = heightFraction })
-                }
+                .animation(.easeInOut(duration: 0.25), value: height)
         }
         .frame(width: width)
+        .onPreferenceChange(SidebarContentHeight.self) { h in
+            if abs(h - contentHeight) > 0.5 { contentHeight = h }
+        }
     }
 }
 
