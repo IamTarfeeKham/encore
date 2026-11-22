@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- App Sandbox: the app (and its sign-in cookies) live in a private container other apps can't read. -->
+  <key>com.apple.security.app-sandbox</key><true/>
+  <!-- Outgoing HTTPS only (YouTube Music, Google sign-in, artwork, LRCLIB). No incoming connections. -->
+  <key>com.apple.security.network.client</key><true/>
+</dict>
+</plist>

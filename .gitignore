@@ -1,0 +1,14 @@
+# Build output
+.build/
+build/
+dist/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Private working notes (not part of the project)
+HANDOFF.md
