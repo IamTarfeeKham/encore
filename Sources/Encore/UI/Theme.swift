@@ -64,6 +64,16 @@ extension View {
         modifier(GlassPanel(radius: radius, tint: tint, interactive: interactive, dense: dense))
     }
 
+    /// Glass panel for lists that float over busy content (the queue): a thick
+    /// frosted, darkened backing under the glass so text behind never shows through.
+    func readablePanel(_ radius: CGFloat = 20) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return self
+            .glassPanel(radius, dense: true)
+            .background(Color.black.opacity(0.35), in: shape)
+            .background(.ultraThickMaterial, in: shape)
+    }
+
     /// Capsule buttons used across the app: `prominent` is a solid accent pill
     /// for the main action, otherwise a soft translucent pill.
     func glassButton(prominent: Bool = false) -> some View {

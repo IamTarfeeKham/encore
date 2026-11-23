@@ -38,7 +38,7 @@ struct ContentView: View {
                         // Hugs its content (a short queue gets a short panel), up to the space available.
                         QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
                             .frame(width: 320)
-                            .glassPanel(20)
+                            .readablePanel(20)
                             .padding(.top, Self.topBarHeight + 6)
                             .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
                             .frame(maxHeight: .infinity, alignment: .top)
@@ -89,7 +89,7 @@ struct ContentView: View {
                         Spacer(minLength: 0)
                         QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
                             .frame(width: 320)
-                            .glassPanel(20)
+                            .readablePanel(20)
                             .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
                             .padding(.top, Self.topBarHeight + 6)
                             .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
