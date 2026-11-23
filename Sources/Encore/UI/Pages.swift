@@ -226,6 +226,7 @@ struct CollectionView: View {
         do {
             let p = try await InnerTube.shared.collection(browseId)
             page = p; tracks = p.tracks; continuation = p.continuation; saved = p.isSaved; error = nil
+            if browseId == "VLLM" { LikeStore.shared.seedLiked(p.tracks.compactMap(\.videoId)) }
         } catch is CancellationError {
         } catch { if page == nil { self.error = error.localizedDescription } }
     }
@@ -391,6 +392,7 @@ struct CollectionView: View {
         Task {
             if let (more, next) = try? await InnerTube.shared.collectionContinuation(token) {
                 tracks += more.filter { $0.videoId != nil }
+                if browseId == "VLLM" { LikeStore.shared.seedLiked(more.compactMap(\.videoId)) }
                 continuation = more.isEmpty ? nil : next
             }
         }
@@ -458,14 +460,28 @@ struct ArtistView: View {
                                 .glassButton().controlSize(.large)
                         }
                         if let cid = page.channelId {
+                            // Subscribe: bright, solid call to action. Subscribed: quiet
+                            // glass with a checkmark (tap to unsubscribe).
                             let isSub = subscribed ?? page.isSubscribed
-                            Button {
-                                subscribed = !isSub
+                            let toggle = {
+                                withAnimation(.easeInOut(duration: 0.2)) { subscribed = !isSub }
+                                model.flash(isSub ? "Unsubscribed" : "Subscribed")
                                 Task { try? await InnerTube.shared.subscribe(channelId: cid, !isSub) }
-                            } label: {
-                                Text(isSub ? "Subscribed" : "Subscribe") + Text(page.subscribers.map { "  \($0)" } ?? "").foregroundColor(.secondary)
                             }
-                            .glassButton().controlSize(.large)
+                            if isSub {
+                                Button(action: toggle) {
+                                    Label { Text("Subscribed") + Text(page.subscribers.map { "  \($0)" } ?? "").foregroundColor(.secondary) }
+                                          icon: { Image(systemName: "checkmark") }
+                                }
+                                .glassButton().controlSize(.large)
+                                .help("Unsubscribe")
+                            } else {
+                                Button(action: toggle) {
+                                    Label { Text("Subscribe") + Text(page.subscribers.map { "  \($0)" } ?? "").foregroundColor(.black.opacity(0.55)) }
+                                          icon: { Image(systemName: "plus") }
+                                }
+                                .buttonStyle(SolidPillStyle())
+                            }
                         }
                     }
                 }
@@ -921,5 +937,20 @@ struct ChipScroller: View {
 
     private func scroll(to i: Int) {
         withAnimation(.timingCurve(0.25, 0.1, 0.25, 1, duration: 0.45)) { pos = chips[i].title }
+    }
+}
+
+/// High-contrast white pill (e.g. "Subscribe"): clearly different from the quiet
+/// glass "Subscribed" state.
+struct SolidPillStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.black)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Capsule().fill(.white.opacity(configuration.isPressed ? 0.8 : 0.95)))
+            .contentShape(Capsule())
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
     }
 }

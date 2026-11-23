@@ -21,7 +21,11 @@ struct ItemMenu: View {
         Button { player.startRadio(item) } label: { Label("Start Radio", systemImage: "dot.radiowaves.left.and.right") }
         Divider()
         if let vid = item.videoId {
-            Button { player.setLike(.like, for: vid); model.flash("Added to Liked Music") } label: { Label("Like", systemImage: "hand.thumbsup") }
+            if LikeStore.shared.liked.contains(vid) {
+                Button { player.setLike(.indifferent, for: vid); model.flash("Removed from Liked Music") } label: { Label("Remove Like", systemImage: "hand.thumbsup.fill") }
+            } else {
+                Button { player.setLike(.like, for: vid); model.flash("Added to Liked Music") } label: { Label("Like", systemImage: "hand.thumbsup") }
+            }
             Menu {
                 Button("New Playlist…") { model.newPlaylistFor = [vid] }
                 Divider()
@@ -163,6 +167,7 @@ struct TrackRow: View {
     var onPlay: () -> Void
     @ObservedObject private var now = PlayerController.shared.now
     @ObservedObject private var durations = DurationCache.shared
+    @ObservedObject private var likes = LikeStore.shared
     @State private var hover = false
     private var player: PlayerController { .shared }
     private var model: AppModel { .shared }
@@ -246,11 +251,17 @@ struct TrackRow: View {
             // sides of it are equal and nothing moves, however long a track is.
             HStack(spacing: 4) {
                 if let vid = item.videoId {
-                    Button { player.setLike(.like, for: vid); model.flash("Added to Liked Music") } label: {
-                        Image(systemName: "hand.thumbsup")
+                    // Filled and in the accent colour when liked; tap again to unlike.
+                    let isLiked = likes.liked.contains(vid)
+                    Button {
+                        player.setLike(isLiked ? .indifferent : .like, for: vid)
+                        model.flash(isLiked ? "Removed from Liked Music" : "Added to Liked Music")
+                    } label: {
+                        Image(systemName: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup")
+                            .foregroundStyle(isLiked ? Color.accentColor : .primary)
                     }
-                    .buttonStyle(BarIconStyle(size: 12, diameter: 26)).help("Like")
-                    .opacity(hover ? 1 : 0.4)
+                    .buttonStyle(BarIconStyle(size: 12, diameter: 26)).help(isLiked ? "Remove like" : "Like")
+                    .opacity(hover || isLiked ? 1 : 0.4)
                 } else {
                     Color.clear.frame(width: 26, height: 26)
                 }

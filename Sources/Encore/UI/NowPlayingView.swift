@@ -50,6 +50,7 @@ struct NowPlayingView: View {
                 .hoverTip(showLyrics ? "Hide lyrics" : "Show lyrics", edge: .bottom)
                 Button { withAnimation(.easeInOut(duration: 0.3)) { model.showQueue.toggle() } } label: {
                     Image(systemName: "list.bullet")
+                        .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                 }
                 .hoverTip("Queue", edge: .bottom)
                 Menu {

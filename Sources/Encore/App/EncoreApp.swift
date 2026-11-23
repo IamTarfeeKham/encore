@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WebHost.shared.park()
             WebHost.shared.watchScreens()
             MenuBarActivation.start()
+            AppDelegate.dropAutomaticSearchFocus()
             ScrollActivity.start()
             WebBridge.shared.start()
             NowPlayingService.shared.start()
@@ -73,10 +74,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if mods == [.command, .option] { NSApp.hideOtherApplications(nil); return nil }
                 if mods == [.command] { NSApp.hide(nil); return nil }
             }
-            let r = event.window?.firstResponder
-            let typing = r is NSText || r is NSTextView || r is NSTextField || r is WKWebView
+            let typing = MainActor.assumeIsolated { Self.isTyping(in: event.window) }
             let handled = MainActor.assumeIsolated { ShortcutStore.shared.handle(event, typing: typing) }
             return handled ? nil : event
+        }
+    }
+
+    /// Whether a keystroke is text input, so single-key shortcuts must not fire.
+    /// macOS parks the cursor in the search field whenever the window opens; that
+    /// alone isn't typing. It is when the search panel is open (you clicked in, or
+    /// started typing), or in any other text field. YouTube's own player view
+    /// (video mode) never counts; the sign-in page does.
+    static func isTyping(in window: NSWindow?) -> Bool {
+        guard let r = window?.firstResponder else { return false }
+        if let v = r as? NSView, v === WebBridge.shared.webView || v.isDescendant(of: WebBridge.shared.webView) { return false }
+        if r is WKWebView { return true }
+        // Any text field with the cursor in it. (The automatic focus macOS gives
+        // the search field is removed in dropAutomaticSearchFocus, so a focused
+        // search field always means you clicked into it or pressed ⌘F.)
+        return r is NSText || r is NSTextView || r is NSTextField
+    }
+
+    /// macOS puts the cursor in the window's first text field (search) whenever the
+    /// window becomes active. That would make single-key shortcuts think you're
+    /// typing, so take that automatic focus away unless you're actually searching.
+    static func dropAutomaticSearchFocus() {
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { n in
+            MainActor.assumeIsolated {
+                guard let w = n.object as? NSWindow, w === WindowOpener.mainWindow else { return }
+                DispatchQueue.main.async {
+                    if !SearchController.shared.visible, w.firstResponder is NSTextView { w.makeFirstResponder(nil) }
+                }
+            }
         }
     }
 
@@ -86,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// player's off-screen "parking" window always counts as a visible window,
     /// so a minimised (or closed) main window never came back. Handle it ourselves.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MenuBarActivation.reopenedAt = Date()
         WindowOpener.showMain()
         return false
     }
@@ -308,6 +338,8 @@ enum WindowOpener {
     }
 
     static func showMain() {
+        // An explicit request to see the window: the menu-bar check must not undo it.
+        MenuBarActivation.reopenedAt = Date()
         // After ⌘H the whole app is hidden; un-hiding brings every window back.
         if NSApp.isHidden { NSApp.unhide(nil) }
         if let w = mainWindow, w.isVisible || w.isMiniaturized {
@@ -360,15 +392,24 @@ enum MenuBarActivation {
     /// windows (not the hidden player window).
     static var menuBarPanelIsOpen: Bool {
         NSApp.windows.contains { w in
-            w.isVisible && !w.styleMask.contains(.titled) && w.level.rawValue > NSWindow.Level.normal.rawValue
+            // The status item's own little window (always present) must not count;
+            // only the dropdown panel, which is much taller than the menu bar.
+            let cls = NSStringFromClass(type(of: w))
+            return w.isVisible && !w.styleMask.contains(.titled)
+                && w.level.rawValue > NSWindow.Level.normal.rawValue
+                && !cls.contains("StatusBar") && w.frame.height > 120
                 && w !== WebHost.shared.parkingWindow
         }
     }
+
+    /// Set when the Dock icon is clicked: that activation must bring the window forward.
+    static var reopenedAt = Date.distantPast
 
     /// After activating: if the menu-bar player is open, send the main window back
     /// behind the window that was in front before.
     private static func restore(final: Bool) {
         guard let other = restoreBelow else { return }
+        if Date().timeIntervalSince(reopenedAt) < 1 { restoreBelow = nil; return }
         if final { restoreBelow = nil }
         guard menuBarPanelIsOpen, let main = WindowOpener.mainWindow else { return }
         main.order(.below, relativeTo: other)

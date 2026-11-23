@@ -356,7 +356,8 @@ struct SidebarRow: View {
     var body: some View {
         HStack(spacing: roomy ? 12 : 10) {
             if let symbol {
-                Image(systemName: symbol)
+                // Selected: the filled version of the icon (when one exists), in the accent colour.
+                Image(systemName: selected ? symbol.filledSymbol : symbol)
                     .font(.system(size: roomy ? 14 : 13, weight: .medium))
                     .frame(width: 20)
                     .foregroundStyle(selected ? Color.accentColor : .primary.opacity(0.8))
@@ -680,5 +681,15 @@ struct ResizeHandle: View {
             case .ended: withAnimation(.easeOut(duration: 0.2)) { hover = false }; NSCursor.arrow.set()
             }
         }
+    }
+}
+
+
+extension String {
+    /// "house" → "house.fill" when that SF Symbol exists; otherwise unchanged.
+    var filledSymbol: String {
+        if hasSuffix(".fill") { return self }
+        let f = self + ".fill"
+        return NSImage(systemSymbolName: f, accessibilityDescription: nil) != nil ? f : self
     }
 }

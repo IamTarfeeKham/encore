@@ -244,3 +244,30 @@ final class DurationCache: ObservableObject {
         }
     }
 }
+
+/// Which songs you've liked or disliked, so every like button can show its state.
+/// Filled from your Liked Music list, the playing song's status and your own taps.
+@MainActor
+final class LikeStore: ObservableObject {
+    static let shared = LikeStore()
+    @Published private(set) var liked = Set<String>()
+    @Published private(set) var disliked = Set<String>()
+
+    func status(_ videoId: String) -> LikeStatus {
+        liked.contains(videoId) ? .like : (disliked.contains(videoId) ? .dislike : .indifferent)
+    }
+
+    func set(_ videoId: String, _ s: LikeStatus) {
+        switch s {
+        case .like: liked.insert(videoId); disliked.remove(videoId)
+        case .dislike: disliked.insert(videoId); liked.remove(videoId)
+        case .indifferent: liked.remove(videoId); disliked.remove(videoId)
+        }
+    }
+
+    /// Songs listed in Liked Music.
+    func seedLiked(_ ids: [String]) {
+        let new = Set(ids).subtracting(liked)
+        if !new.isEmpty { liked.formUnion(new) }
+    }
+}

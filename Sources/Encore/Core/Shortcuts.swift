@@ -35,7 +35,8 @@ struct KeyCombo: Codable, Hashable {
         var s = ""
         if control { s += "⌃" }
         if option { s += "⌥" }
-        if shift { s += "⇧" }
+        // A symbol like "+" already implies Shift; don't show "⇧+".
+        if shift && !(key.count == 1 && !(key.first?.isLetter ?? false)) { s += "⇧" }
         if command { s += "⌘" }
         switch key {
         case "space": s += "Space"
@@ -82,8 +83,8 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .playPause: return "Play / Pause"
         case .next: return "Next song"
         case .previous: return "Previous song"
-        case .skipForward: return "Skip forward 10 s"
-        case .skipBack: return "Skip back 10 s"
+        case .skipForward: return "Skip forward 15 s"
+        case .skipBack: return "Skip back 15 s"
         case .volumeUp: return "Volume up"
         case .volumeDown: return "Volume down"
         case .mute: return "Mute / Unmute"
@@ -106,14 +107,14 @@ enum ShortcutAction: String, CaseIterable, Codable, Identifiable {
         case .playPause: return KeyCombo("space")
         case .next: return KeyCombo("right", command: true)
         case .previous: return KeyCombo("left", command: true)
-        case .skipForward: return KeyCombo("right", command: true, option: true)
-        case .skipBack: return KeyCombo("left", command: true, option: true)
+        case .skipForward: return KeyCombo("l")
+        case .skipBack: return KeyCombo("j")
         case .volumeUp: return KeyCombo("up", command: true)
         case .volumeDown: return KeyCombo("down", command: true)
-        case .mute: return KeyCombo("m", command: true, option: true)
+        case .mute: return KeyCombo("m")
         case .shuffle: return KeyCombo("s")
         case .repeatMode: return KeyCombo("r")
-        case .like: return KeyCombo("l")
+        case .like: return KeyCombo("+", shift: true)
         case .nowPlaying: return KeyCombo("l", command: true)
         case .queue: return KeyCombo("u", command: true, option: true)
         case .miniPlayer: return KeyCombo("m", command: true, shift: true)
@@ -168,11 +169,11 @@ final class ShortcutStore: ObservableObject {
         case .playPause: p.togglePlayPause()
         case .next: p.next()
         case .previous: p.previous()
-        case .skipForward: p.skip(by: 10)
-        case .skipBack: p.skip(by: -10)
+        case .skipForward: p.skip(by: 15)
+        case .skipBack: p.skip(by: -15)
         case .volumeUp: p.volume = min(100, p.volume + 8)
         case .volumeDown: p.volume = max(0, p.volume - 8)
-        case .mute: p.toggleMute()
+        case .mute: p.toggleMute(); m.flash(p.muted ? "Muted" : "Unmuted")
         case .shuffle: p.toggleShuffle(); m.flash(p.shuffle ? "Shuffle On" : "Shuffle Off")
         case .repeatMode:
             p.repeatMode = p.repeatMode.next

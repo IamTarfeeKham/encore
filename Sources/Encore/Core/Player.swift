@@ -509,6 +509,7 @@ final class PlayerController: ObservableObject {
         }
         if let s = await api.likeStatus(videoId: vid), current?.videoId == vid {
             likeStatus = s
+            LikeStore.shared.set(vid, s)
             // Auto-skip songs you've disliked (but not one you picked deliberately to play alone).
             if s == .dislike, Prefs.shared.autoSkipDisliked, queue.count > 1 {
                 AppModel.shared.flash("Skipped a song you disliked")
@@ -522,6 +523,7 @@ final class PlayerController: ObservableObject {
     func setLike(_ status: LikeStatus, for videoId: String? = nil) {
         guard let vid = videoId ?? current?.videoId else { return }
         if vid == current?.videoId { likeStatus = status }
+        LikeStore.shared.set(vid, status)
         Task {
             do { try await api.rate(videoId: vid, status) }
             catch { lastError = error.localizedDescription }

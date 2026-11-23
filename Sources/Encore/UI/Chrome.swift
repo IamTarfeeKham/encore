@@ -116,7 +116,12 @@ struct NavButtons: View {
         // Chevrons are narrow glyphs, so they get smaller circles and tighter
         // spacing: every glyph-to-glyph gap comes out the same as the rest of the bar.
         HStack(spacing: 0) {
-            Button { model.goHome() } label: { Image(systemName: "house") }
+            // Filled and accent-coloured while you're on Home.
+            let onHome = model.selection == .home && model.path.isEmpty && !model.showNowPlaying
+            Button { model.goHome() } label: {
+                Image(systemName: onHome ? "house.fill" : "house")
+                    .foregroundStyle(onHome ? Color.accentColor : .primary)
+            }
                 .buttonStyle(BarIconStyle(size: 13))
                 .hoverTip("Home", edge: .bottom)
             Button { model.goBack() } label: { Image(systemName: "chevron.left") }

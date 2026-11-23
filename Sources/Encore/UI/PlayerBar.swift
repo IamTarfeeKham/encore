@@ -60,10 +60,12 @@ struct PlayerBar: View {
                 HStack(spacing: 8) {
                     Button { player.toggleLike() } label: {
                         Image(systemName: player.likeStatus == .like ? "hand.thumbsup.fill" : "hand.thumbsup")
+                            .foregroundStyle(player.likeStatus == .like ? Color.accentColor : .primary)
                     }.hoverTip(player.likeStatus == .like ? "Remove like" : "Like")
                     Button { player.toggleDislike() } label: {
                         Image(systemName: player.likeStatus == .dislike ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                    }.hoverTip("Dislike")
+                            .foregroundStyle(player.likeStatus == .dislike ? Color.accentColor : .primary)
+                    }.hoverTip(player.likeStatus == .dislike ? "Remove dislike" : "Dislike")
                     Menu {
                         if let item = currentItem { ItemMenu(item: item) }
                     } label: { Image(systemName: "ellipsis") }

@@ -429,7 +429,7 @@ struct SettingsView: View {
             SettingsCard("General") {
                 SettingsToggle("Show player in the menu bar", $prefs.showMenuBarPlayer)
                 SettingsToggle("Notify when the song changes (while in background)", $prefs.notifyOnTrackChange)
-                SettingsToggle("Single-key shortcuts (Space, R, S, L)", $prefs.singleKeyShortcuts)
+                SettingsToggle("Single-key shortcuts (Space, M, J, L, R, S, +)", $prefs.singleKeyShortcuts)
             }
         case .shortcuts:
             ForEach([("Playback", [ShortcutAction.playPause, .next, .previous, .skipForward, .skipBack, .shuffle, .repeatMode, .like]),
