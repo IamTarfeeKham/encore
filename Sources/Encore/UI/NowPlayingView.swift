@@ -48,7 +48,7 @@ struct NowPlayingView: View {
                     Image(systemName: showLyrics ? "quote.bubble.fill" : "quote.bubble")
                 }
                 .hoverTip(showLyrics ? "Hide lyrics" : "Show lyrics", edge: .bottom)
-                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showQueue.toggle() } } label: {
+                Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: {
                     Image(systemName: "list.bullet")
                         .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                 }

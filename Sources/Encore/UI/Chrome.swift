@@ -44,7 +44,7 @@ struct TopBar: View {
         HStack(spacing: 0) {
             // 14 = bar padding, 6 = the sidebar glyph's inset inside its 30 pt circle.
             Color.clear.frame(width: Self.firstGlyphX - 14 - 6)
-            Button { withAnimation(.easeInOut(duration: 0.3)) { model.sidebarVisible.toggle() } } label: {
+            Button { withAnimation(Motion.panel) { model.sidebarVisible.toggle() } } label: {
                 Image(systemName: "sidebar.left")
             }
             .buttonStyle(BarIconStyle(size: 14))

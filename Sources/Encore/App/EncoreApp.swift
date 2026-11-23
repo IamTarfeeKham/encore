@@ -281,7 +281,7 @@ struct PlayerCommands: Commands {
                 .shortcut(.settings)
         }
         CommandGroup(replacing: .sidebar) {
-            Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { model.sidebarVisible.toggle() }
+            Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { withAnimation(Motion.panel) { model.sidebarVisible.toggle() } }
                 .shortcut(.toggleSidebar)
             Button("Edit Sidebar…") { model.editingSidebar = true }
         }
@@ -292,7 +292,7 @@ struct PlayerCommands: Commands {
             Button(model.showNowPlaying ? "Hide Now Playing" : "Show Now Playing") {
                 withAnimation(.spring(duration: 0.45)) { model.showNowPlaying.toggle() }
             }.shortcut(.nowPlaying)
-            Button(model.showQueue ? "Hide Playing Next" : "Show Playing Next") { model.showQueue.toggle() }
+            Button(model.showQueue ? "Hide Playing Next" : "Show Playing Next") { withAnimation(Motion.panel) { model.showQueue.toggle() } }
                 .shortcut(.queue)
             Button("Mini Player") { openWindow(id: "mini") }.shortcut(.miniPlayer)
             Divider()

@@ -607,3 +607,9 @@ struct CursorSheen<S: Shape>: ViewModifier {
 extension View {
     func cursorSheen<S: Shape>(_ shape: S, strength: Double = 0.2) -> some View { modifier(CursorSheen(shape: shape, strength: strength)) }
 }
+
+
+/// Motion used for sliding panels (sidebar, queue): a soft, slightly fluid spring.
+enum Motion {
+    static let panel = Animation.spring(response: 0.42, dampingFraction: 0.86)
+}

@@ -100,7 +100,7 @@ struct PlayerBar: View {
                 }
                 .foregroundStyle(model.showNowPlaying ? Color.accentColor : .primary)
                 .hoverTip("Lyrics")
-                Button { withAnimation(.easeInOut(duration: 0.3)) { model.showQueue.toggle() } } label: { Image(systemName: "list.bullet") }
+                Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: { Image(systemName: "list.bullet") }
                     .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                     .hoverTip("Queue")
                 Button { openWindow(id: "mini") } label: { Image(systemName: "pip") }

@@ -182,10 +182,10 @@ final class ShortcutStore: ObservableObject {
             guard p.current != nil else { return }
             p.toggleLike(); m.flash(p.likeStatus == .like ? "Liked" : "Like Removed")
         case .nowPlaying: withAnimation(.spring(duration: 0.45)) { m.showNowPlaying.toggle() }
-        case .queue: withAnimation(.easeInOut(duration: 0.3)) { m.showQueue.toggle() }
+        case .queue: withAnimation(Motion.panel) { m.showQueue.toggle() }
         case .miniPlayer: NotificationCenter.default.post(name: .openMiniPlayer, object: nil)
         case .search: m.focusSearch = true
-        case .toggleSidebar: withAnimation(.easeInOut(duration: 0.3)) { m.sidebarVisible.toggle() }
+        case .toggleSidebar: withAnimation(Motion.panel) { m.sidebarVisible.toggle() }
         case .back: m.goBack()
         case .forward: m.goForward()
         case .settings: m.showNowPlaying = false; m.selection = .settings

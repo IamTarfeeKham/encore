@@ -21,10 +21,15 @@ struct ContentView: View {
                         ResizableSidebar()
                             .padding(.top, Self.topBarHeight + 6)
                             .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
-                            .transition(.move(edge: .leading))
+                            .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                     DetailPane()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // When a panel opens or closes, the page takes its new width in
+                        // one step instead of re-laying out every frame of the slide
+                        // (that per-frame re-layout of long lists was the jitter).
+                        .animation(nil, value: model.sidebarVisible)
+                        .animation(nil, value: model.showQueue)
                         // Content fades out softly as it scrolls up under the top bar (no band, no border).
                         .mask {
                             VStack(spacing: 0) {
@@ -42,7 +47,7 @@ struct ContentView: View {
                             .padding(.top, Self.topBarHeight + 6)
                             .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
                             .frame(maxHeight: .infinity, alignment: .top)
-                            .transition(.move(edge: .trailing))
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
                 .padding(.horizontal, Self.panelGap)
@@ -634,7 +639,10 @@ struct ResizableSidebar: View {
     // Height: follows the sidebar's content, up to the space available.
     @State private var width: Double = Prefs.shared.sidebarWidth
     @State private var startWidth: Double?
-    @State private var contentHeight: CGFloat = 0
+    // Remembered across hide/show, so a re-shown sidebar appears at its real
+    // height at once instead of briefly at full height.
+    private static var lastContentHeight: CGFloat = 0
+    @State private var contentHeight: CGFloat = ResizableSidebar.lastContentHeight
 
     var body: some View {
         GeometryReader { g in
@@ -658,7 +666,7 @@ struct ResizableSidebar: View {
         }
         .frame(width: width)
         .onPreferenceChange(SidebarContentHeight.self) { h in
-            if abs(h - contentHeight) > 0.5 { contentHeight = h }
+            if abs(h - contentHeight) > 0.5 { contentHeight = h; ResizableSidebar.lastContentHeight = h }
         }
     }
 }

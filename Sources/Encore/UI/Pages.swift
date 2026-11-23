@@ -62,10 +62,14 @@ struct ShelvesPage: View {
                     ForEach((page.shelves + extra).filter { !hidden.contains($0.title) }) { s in
                         ShelfView(shelf: s, hideable: id == "home")
                     }
-                    if continuation != nil {
+                    // Keeps going like YouTube: YouTube's own pages first, then an
+                    // endless "Because you listened to…" feed (see loadMore).
+                    if continuation != nil || canDiscover {
                         ProgressView().frame(maxWidth: .infinity).padding()
                             .onAppear { loadMore() }
-                    } else if id == "home", !prefs.hiddenHomeSections.isEmpty {
+                            .id("more-\(extra.count)")
+                    }
+                    if id == "home", !prefs.hiddenHomeSections.isEmpty {
                         HStack(spacing: 12) {
                             Image(systemName: "eye.slash").foregroundStyle(.secondary)
                             Text("\(prefs.hiddenHomeSections.count) hidden section\(prefs.hiddenHomeSections.count == 1 ? "" : "s")")
@@ -96,6 +100,7 @@ struct ShelvesPage: View {
                 var merged = p
                 if chip != nil, let old = page { merged.chips = old.chips }
                 page = merged; extra = []; continuation = p.continuation; error = nil
+                usedSeeds = []; discoveryExhausted = false
             } catch is CancellationError {
             } catch { if page == nil { self.error = error.localizedDescription } }
         }
@@ -114,16 +119,59 @@ struct ShelvesPage: View {
         }
     }
 
+    /// Home and Explore never run out: after YouTube's own feed ends, keep adding
+    /// "Because you listened to…" sections built from YouTube's related-music page
+    /// for songs you've played or that appear in the feed.
+    private var discovers: Bool { id == "home" || id == "explore" }
+    private var canDiscover: Bool { discovers && !discoveryExhausted && extra.count < 80 }
+    @State private var usedSeeds = Set<String>()
+    @State private var discoveryExhausted = false
+
     private func loadMore() {
-        guard let token = continuation, !loadingMore else { return }
-        loadingMore = true
-        Task {
-            defer { loadingMore = false }
-            if let more = try? await InnerTube.shared.continuation(token) {
-                extra += more.shelves
-                continuation = more.continuation
-            } else { continuation = nil }
+        guard !loadingMore else { return }
+        if let token = continuation {
+            loadingMore = true
+            Task {
+                defer { loadingMore = false }
+                if let more = try? await InnerTube.shared.continuation(token) {
+                    extra += more.shelves
+                    continuation = more.continuation
+                } else { continuation = nil }
+            }
+        } else if canDiscover {
+            loadingMore = true
+            Task {
+                defer { loadingMore = false }
+                await discoverMore()
+            }
         }
+    }
+
+    /// Adds one or two sections related to a song not used before.
+    private func discoverMore() async {
+        // Seeds: your recent plays first, then songs shown on this page.
+        var seeds: [(id: String, title: String)] = PlayStats.shared.recent(40).map { ($0.videoId, $0.title) }
+        let shown = ((page?.shelves ?? []) + extra).flatMap(\.items).compactMap { i in i.videoId.map { ($0, i.title) } }
+        seeds += shown.shuffled()
+        let shownTitles = Set(((page?.shelves ?? []) + extra).map { $0.title + ($0.strapline ?? "") })
+        for seed in seeds where !usedSeeds.contains(seed.id) {
+            usedSeeds.insert(seed.id)
+            guard let q = try? await InnerTube.shared.watchQueue(videoId: seed.id, playlistId: nil),
+                  let related = q.relatedBrowseId,
+                  let rp = try? await InnerTube.shared.browse(related) else { continue }
+            let fresh = Parser.browsePage(rp).shelves
+                .filter { !$0.items.isEmpty && $0.style != .moods }
+                .prefix(2)
+                .map { sh -> Shelf in
+                    var sh = sh
+                    sh.strapline = "Because you listened to \(seed.title)"
+                    sh.moreBrowseId = nil
+                    return sh
+                }
+                .filter { !shownTitles.contains($0.title + ($0.strapline ?? "")) }
+            if !fresh.isEmpty { extra += fresh; return }
+        }
+        discoveryExhausted = true
     }
 }
 
