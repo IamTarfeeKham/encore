@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             WebHost.shared.park()
+            WebHost.shared.watchScreens()
+            MenuBarActivation.start()
             ScrollActivity.start()
             WebBridge.shared.start()
             NowPlayingService.shared.start()
@@ -64,6 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Single-key shortcuts (only when not typing): Space play/pause, R repeat, S shuffle, L like.
         // All app shortcuts (customisable in Settings → Keyboard Shortcuts).
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Hide / Hide Others always work, even when a web view (video mode,
+            // sign-in) has keyboard focus and would otherwise swallow the keys.
+            let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if event.charactersIgnoringModifiers?.lowercased() == "h" {
+                if mods == [.command, .option] { NSApp.hideOtherApplications(nil); return nil }
+                if mods == [.command] { NSApp.hide(nil); return nil }
+            }
             let r = event.window?.firstResponder
             let typing = r is NSText || r is NSTextView || r is NSTextField || r is WKWebView
             let handled = MainActor.assumeIsolated { ShortcutStore.shared.handle(event, typing: typing) }
@@ -137,8 +146,30 @@ final class WebHost {
         w.ignoresMouseEvents = true
         w.isExcludedFromWindowsMenu = true
         w.hasShadow = false
+        // Fully transparent: macOS moves windows that sit off every screen back on
+        // screen (after sleep or a display change), which showed up as a big grey
+        // rectangle. Transparent, it can never be seen even if that happens.
+        w.alphaValue = 0
+        w.backgroundColor = .clear
+        w.isOpaque = false
         return w
     }()
+    private var observers: [NSObjectProtocol] = []
+
+    func repark() { parking.setFrameOrigin(NSPoint(x: -20000, y: -20000)) }
+
+    /// The hidden player window, so other code can tell it apart from real windows.
+    var parkingWindow: NSWindow { parking }
+
+    /// Puts the parking window back off-screen whenever the screen setup changes.
+    func watchScreens() {
+        let reposition: @Sendable (Notification) -> Void = { _ in
+            MainActor.assumeIsolated { WebHost.shared.repark() }
+        }
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: reposition))
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: reposition))
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main, using: reposition))
+    }
 
     /// Moving a web view between windows can make WebKit pause media; resume it.
     private func keepPlaying(_ wasPlaying: Bool) {
@@ -277,6 +308,8 @@ enum WindowOpener {
     }
 
     static func showMain() {
+        // After ⌘H the whole app is hidden; un-hiding brings every window back.
+        if NSApp.isHidden { NSApp.unhide(nil) }
         if let w = mainWindow, w.isVisible || w.isMiniaturized {
             if w.isMiniaturized { w.deminiaturize(nil) }
             w.makeKeyAndOrderFront(nil)
@@ -284,5 +317,61 @@ enum WindowOpener {
             open?(id: "main")
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+
+/// Clicking the menu-bar icon activates the app, and activation brings the main
+/// window to the front too. When the activation came from opening the menu-bar
+/// player, put the main window back where it was (behind the app you were using).
+@MainActor
+enum MenuBarActivation {
+    private static var restoreBelow: Int?
+
+    static func start() {
+        NotificationCenter.default.addObserver(forName: NSApplication.willBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { snapshot() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                // The panel can appear a moment after activation; check twice.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { restore(final: false) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { restore(final: true) }
+            }
+        }
+    }
+
+    /// Before activating: is another app's window in front of our main window?
+    private static func snapshot() {
+        restoreBelow = nil
+        guard let main = WindowOpener.mainWindow, main.isVisible,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let normal = list.filter { ($0[kCGWindowLayer as String] as? Int) == 0 }
+        guard let mainIndex = normal.firstIndex(where: { ($0[kCGWindowNumber as String] as? Int) == main.windowNumber }),
+              let otherIndex = normal.firstIndex(where: { ($0[kCGWindowOwnerPID as String] as? Int32) != pid }),
+              otherIndex < mainIndex
+        else { return }
+        restoreBelow = normal[otherIndex][kCGWindowNumber as String] as? Int
+    }
+
+    /// The menu-bar player's panel: an untitled window floating above normal
+    /// windows (not the hidden player window).
+    static var menuBarPanelIsOpen: Bool {
+        NSApp.windows.contains { w in
+            w.isVisible && !w.styleMask.contains(.titled) && w.level.rawValue > NSWindow.Level.normal.rawValue
+                && w !== WebHost.shared.parkingWindow
+        }
+    }
+
+    /// After activating: if the menu-bar player is open, send the main window back
+    /// behind the window that was in front before.
+    private static func restore(final: Bool) {
+        guard let other = restoreBelow else { return }
+        if final { restoreBelow = nil }
+        guard menuBarPanelIsOpen, let main = WindowOpener.mainWindow else { return }
+        main.order(.below, relativeTo: other)
+        restoreBelow = nil
     }
 }

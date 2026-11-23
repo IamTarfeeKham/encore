@@ -139,11 +139,14 @@ struct SearchField: View {
         .overlay(Capsule().strokeBorder(Color.primary.opacity(focused ? 0.22 : 0.07), lineWidth: 0.8))
         .shadow(color: .black.opacity(focused ? 0.25 : 0), radius: 10, y: 4)
         .animation(.easeOut(duration: 0.15), value: focused)
-        .onChange(of: model.focusSearch) { if model.focusSearch { focused = true; model.focusSearch = false } }
+        .onChange(of: model.focusSearch) { if model.focusSearch { focused = true; search.visible = true; model.focusSearch = false } }
         // macOS focuses the first text field when the window opens; only a real
         // click/⌘F should open the panel, so ignore focus in the first moments.
         .onAppear { appearedAt = Date(); DispatchQueue.main.async { focused = false } }
-        .onChange(of: focused) { if focused && Date().timeIntervalSince(appearedAt) > 1.2 { search.visible = true } }
+        // Opening the panel takes a click in the field, ⌘F or typing. macOS also
+        // re-focuses this field whenever the window becomes active (e.g. after
+        // clicking the menu-bar player), and that alone must not pop the panel.
+        .simultaneousGesture(TapGesture().onEnded { search.visible = true })
         .onChange(of: model.searchText) {
             search.queryChanged(model.searchText)
             if focused && model.searchText != model.submittedSearch { search.visible = true }

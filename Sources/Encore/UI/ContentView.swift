@@ -34,7 +34,7 @@ struct ContentView: View {
                                 Color.black
                             }
                         }
-                    if model.showQueue {
+                    if model.showQueue && !model.showNowPlaying {
                         // Hugs its content (a short queue gets a short panel), up to the space available.
                         QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
                             .frame(width: 320)
@@ -80,6 +80,24 @@ struct ContentView: View {
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                 removal: .move(edge: .bottom).combined(with: .opacity)))
                         .zIndex(1)
+                }
+
+                // With Now Playing open, the queue floats above it on the right
+                // (it used to open underneath, hidden).
+                if model.showNowPlaying && model.showQueue {
+                    HStack {
+                        Spacer(minLength: 0)
+                        QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
+                            .frame(width: 320)
+                            .glassPanel(20)
+                            .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
+                            .padding(.top, Self.topBarHeight + 6)
+                            .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
+                    .padding(.horizontal, Self.panelGap)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(1.5)
                 }
 
                 PlayerBar()

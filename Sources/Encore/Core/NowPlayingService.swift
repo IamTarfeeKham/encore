@@ -11,26 +11,11 @@ final class NowPlayingService {
     static let shared = NowPlayingService()
     private let player = PlayerController.shared
     private var bag = Set<AnyCancellable>()
-    private var artworkFor: String?
-    private var artwork: MPMediaItemArtwork?
     private var lastNotified: String?
 
-    func start() {
-        let cc = MPRemoteCommandCenter.shared()
-        cc.playCommand.addTarget { [weak self] _ in self?.player.resume(); return .success }
-        cc.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); return .success }
-        cc.togglePlayPauseCommand.addTarget { [weak self] _ in self?.player.togglePlayPause(); return .success }
-        cc.nextTrackCommand.addTarget { [weak self] _ in self?.player.next(); return .success }
-        cc.previousTrackCommand.addTarget { [weak self] _ in self?.player.previous(); return .success }
-        cc.changePlaybackPositionCommand.addTarget { [weak self] e in
-            guard let e = e as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            self?.player.seek(to: e.positionTime); return .success
-        }
-        cc.likeCommand.addTarget { [weak self] _ in self?.player.setLike(.like); return .success }
-        cc.dislikeCommand.addTarget { [weak self] _ in self?.player.toggleDislike(); return .success }
-        cc.likeCommand.localizedTitle = "Like"
-        cc.dislikeCommand.localizedTitle = "Dislike"
+    private var sentMetaFor: String?
 
+    func start() {
         player.objectWillChange
             .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
             .sink { [weak self] in self?.update() }
@@ -43,45 +28,51 @@ final class NowPlayingService {
             .filter { abs($0.1 - $0.0) > 1.5 }
             .sink { [weak self] _ in self?.update() }
             .store(in: &bag)
+        // The page reloads its session state when it (re)loads.
+        NotificationCenter.default.publisher(for: .ytBridgeReady)
+            .sink { [weak self] _ in self?.sentMetaFor = nil; self?.update() }
+            .store(in: &bag)
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
     }
 
+    /// Buttons from Control Center, the Now Playing widget, media keys and AirPods.
+    func handleRemote(action: String, seekTime: Double?) {
+        switch action {
+        case "play": player.resume()
+        case "pause", "stop": player.pause()
+        case "nexttrack": player.next()
+        case "previoustrack": player.previous()
+        case "seekto": if let t = seekTime { player.seek(to: t) }
+        default: break
+        }
+    }
+
+    /// Publishes the current track through the page's Media Session, which WebKit
+    /// shows as the app's single Now Playing entry (see WebBridge.injectedJS).
     private func update() {
-        let center = MPNowPlayingInfoCenter.default()
-        guard let t = player.current else {
-            center.nowPlayingInfo = nil
-            center.playbackState = .stopped
-            return
-        }
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: t.title,
-            MPMediaItemPropertyArtist: t.artistLine,
-            MPMediaItemPropertyPlaybackDuration: player.clock.duration,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: player.clock.time,
-            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? player.playbackRate : 0,
-            MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
-            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
-        ]
-        if let a = t.album?.name { info[MPMediaItemPropertyAlbumTitle] = a }
-        if artworkFor == t.videoId, let artwork { info[MPMediaItemPropertyArtwork] = artwork }
-        center.nowPlayingInfo = info
-        center.playbackState = player.isPlaying ? .playing : .paused
-
-        let cc = MPRemoteCommandCenter.shared()
-        cc.likeCommand.isActive = player.likeStatus == .like
-        cc.dislikeCommand.isActive = player.likeStatus == .dislike
-
-        if artworkFor != t.videoId, let url = t.largeArtwork {
-            artworkFor = t.videoId
-            artwork = nil
-            Task {
-                guard let img = await ImageLoader.shared.image(for: url) else { return }
-                let art = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
-                if self.artworkFor == t.videoId { self.artwork = art; self.update() }
+        // Clear anything a previous version published natively.
+        if MPNowPlayingInfoCenter.default().nowPlayingInfo != nil { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
+        var payload: [String: Any] = [:]
+        if let t = player.current {
+            if sentMetaFor != t.videoId {
+                sentMetaFor = t.videoId
+                var meta: [String: Any] = ["title": t.title, "artist": t.artistLine]
+                // Control Center shows "artist – album"; never leave that slot empty.
+                meta["album"] = t.album?.name ?? AppInfo.name
+                if let art = t.largeArtwork?.absoluteString { meta["art"] = art }
+                payload["meta"] = meta
+                notify(t)
             }
-            notify(t)
+            payload["state"] = player.isPlaying ? "playing" : "paused"
+            payload["pos"] = ["duration": player.clock.duration, "position": player.clock.time,
+                              "rate": player.playbackRate]
+        } else {
+            if sentMetaFor != nil { sentMetaFor = nil; payload["meta"] = NSNull() }
+            payload["state"] = "none"
         }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) else { return }
+        Task { await WebBridge.shared.js("window.__ytmacNP && window.__ytmacNP(\(json))") }
     }
 
     private func notify(_ t: Track) {

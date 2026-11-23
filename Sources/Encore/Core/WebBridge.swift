@@ -55,6 +55,7 @@ final class WebBridge: NSObject, ObservableObject {
         config.websiteDataStore = .default()   // persistent cookies = stays signed in
         config.mediaTypesRequiringUserActionForPlayback = []
         config.preferences.isElementFullscreenEnabled = true
+        WebBridge.enableMediaSession(config.preferences)
         config.defaultWebpagePreferences.allowsContentJavaScript = true
         let ucc = WKUserContentController()
         ucc.addUserScript(WKUserScript(source: WebBridge.injectedJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -67,6 +68,16 @@ final class WebBridge: NSObject, ObservableObject {
         webView.underPageBackgroundColor = .black
         webView.setValue(false, forKey: "drawsBackground")
         ucc.add(WeakHandler(self), name: "ytmac")
+    }
+
+    /// Lets WebKit use the page's Media Session for the Now Playing entry, so it
+    /// shows the app's track info and previous/next buttons (instead of generic
+    /// ±15 s skips). WebKit option, applied only when present.
+    static func enableMediaSession(_ prefs: WKPreferences) {
+        let sel = NSSelectorFromString("_setMediaSessionEnabled:")
+        guard prefs.responds(to: sel), let m = class_getInstanceMethod(type(of: prefs), sel) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(method_getImplementation(m), to: Setter.self)(prefs, sel, true)
     }
 
     func start() {
@@ -173,6 +184,10 @@ final class WebBridge: NSObject, ObservableObject {
             Task { await refreshClientInfo() }
             return
         }
+        if type == "remote" {   // a Control Center / media-key / AirPods button
+            NowPlayingService.shared.handleRemote(action: d["action"] as? String ?? "", seekTime: d["seekTime"] as? Double)
+            return
+        }
         onEvent?(type, d)
     }
 
@@ -260,6 +275,45 @@ extension WebBridge {
         Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
         Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
         document.addEventListener('visibilitychange', e => e.stopImmediatePropagation(), true);
+      } catch (e) {}
+
+      // One Now Playing entry, owned by the app. WebKit publishes this page's Media
+      // Session to Control Center whatever we do, so instead of adding a second
+      // entry natively, take the session over: YouTube's own metadata, buttons and
+      // position are ignored, the app supplies them (window.__ytmacNP), and every
+      // button is routed to the app's queue.
+      try {
+        const ms = navigator.mediaSession;
+        if (ms && window.MediaSession) {
+          const P = MediaSession.prototype;
+          const mdSet = Object.getOwnPropertyDescriptor(P, 'metadata').set;
+          const psSet = Object.getOwnPropertyDescriptor(P, 'playbackState').set;
+          const setHandler = P.setActionHandler.bind(ms);
+          const setPos = P.setPositionState ? P.setPositionState.bind(ms) : null;
+          let md = null, ps = 'none';
+          Object.defineProperty(ms, 'metadata', { get: () => md, set: () => {}, configurable: true });
+          Object.defineProperty(ms, 'playbackState', { get: () => ps, set: () => {}, configurable: true });
+          ms.setActionHandler = () => {};
+          ms.setPositionState = () => {};
+          const route = (action) => (d) => post({ type: 'remote', action, seekTime: d && d.seekTime });
+          for (const a of ['play', 'pause', 'stop', 'previoustrack', 'nexttrack', 'seekto']) {
+            try { setHandler(a, route(a)); } catch (e) {}
+          }
+          for (const a of ['seekforward', 'seekbackward']) { try { setHandler(a, null); } catch (e) {} }
+          window.__ytmacNP = (o) => {
+            try {
+              if (o.meta !== undefined) {
+                md = o.meta ? new MediaMetadata({ title: o.meta.title, artist: o.meta.artist, album: o.meta.album || '',
+                                                  artwork: o.meta.art ? [{ src: o.meta.art, sizes: '544x544' }] : [] }) : null;
+                mdSet.call(ms, md);
+              }
+              if (o.state) { ps = o.state; psSet.call(ms, ps); }
+              if (o.pos && setPos && o.pos.duration > 0) {
+                setPos({ duration: o.pos.duration, position: Math.max(0, Math.min(o.pos.position, o.pos.duration)), playbackRate: o.pos.rate || 1 });
+              }
+            } catch (e) {}
+          };
+        }
       } catch (e) {}
       setInterval(() => {
         window._lact = Date.now();
