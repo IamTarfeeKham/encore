@@ -25,6 +25,15 @@ struct EncoreApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands { PlayerCommands(player: player, model: model) }
 
+        Window("About \(AppInfo.name)", id: "about") {
+            AboutView()
+                .preferredColorScheme(prefs.colorScheme)
+                .tint(prefs.accentColor)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Window("Mini Player", id: "mini") {
             MiniPlayerView()
                 .environmentObject(player)
@@ -241,6 +250,9 @@ struct PlayerCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About \(AppInfo.name)") { openWindow(id: "about") }
+        }
         CommandMenu("Controls") {
             Button(player.isPlaying ? "Pause" : "Play") { player.togglePlayPause() }
             Button("Next") { player.next() }.shortcut(.next)

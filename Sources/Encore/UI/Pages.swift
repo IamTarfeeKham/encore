@@ -23,42 +23,6 @@ extension View {
     }
 }
 
-/// Reports how far the enclosing scroll view is pulled down past its top, straight
-/// from AppKit's clip view — no SwiftUI work per scrolled frame.
-private struct ScrollOffsetObserver: NSViewRepresentable {
-    let onChange: (CGFloat) -> Void
-    func makeNSView(context: Context) -> ObserverView { let v = ObserverView(); v.onChange = onChange; return v }
-    func updateNSView(_ v: ObserverView, context: Context) { v.onChange = onChange }
-
-    final class ObserverView: NSView {
-        var onChange: ((CGFloat) -> Void)?
-        private var token: NSObjectProtocol?
-        private var last: CGFloat = 0
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let t = token { NotificationCenter.default.removeObserver(t); token = nil }
-            guard window != nil, let sv = enclosingScrollView else { return }
-            sv.contentView.postsBoundsChangedNotifications = true
-            token = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
-                                                           object: sv.contentView, queue: .main) { [weak self, weak sv] _ in
-                guard let sv, let doc = sv.documentView else { return }
-                let r = sv.documentVisibleRect
-                let top = (doc.isFlipped ? r.minY : doc.bounds.height - r.maxY) + sv.contentInsets.top
-                let pulled = max(0, -top)
-                MainActor.assumeIsolated {
-                    guard let self, pulled != self.last, pulled < 400 else { return }
-                    // Only matters near the top; skip the callback while far down the page.
-                    if pulled == 0 && self.last == 0 { return }
-                    self.last = pulled
-                    self.onChange?(pulled)
-                }
-            }
-        }
-        deinit { if let t = token { NotificationCenter.default.removeObserver(t) } }
-    }
-}
-
 // MARK: - Shelf pages (Home / Explore / Charts / Moods / generic browse)
 
 struct ShelvesPage: View {
@@ -81,18 +45,28 @@ struct ShelvesPage: View {
     @ObservedObject private var prefs = Prefs.shared
     private static let pullDistance: CGFloat = 70
 
-    /// How far below the window the page is prepared. The scroll view is made this
-    /// much taller than the window (the extra part is clipped away), so the lazy
-    /// stack builds each section — header, carousel, cards, image requests — while
-    /// it's still out of sight, instead of in the middle of a scroll frame.
-    private static let lookahead: CGFloat = 900
-
     var body: some View {
-        GeometryReader { geo in
-            scroller
-                .frame(width: geo.size.width, height: geo.size.height + Self.lookahead, alignment: .top)
+        Group {
+            if let page {
+                FeedView(rows: rows(for: page),
+                         resetKey: "\(id)|\(page.shelves.first?.id.uuidString ?? "")",
+                         onNearEnd: { loadMore() },
+                         onPull: { updatePull($0) })
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text(title).font(.system(size: 30, weight: .bold))
+                        if let error {
+                            ErrorView(message: error) { self.error = nil; reload += 1 }
+                        } else {
+                            LoadingView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .pagePadding()
+                }
+            }
         }
-        .clipped()
         .overlay(alignment: .top) { pullIndicator }
         .task(id: "\(id)|\(chip?.title ?? "")|\(reload)") {
             defer { if refreshing { withAnimation(.easeOut(duration: 0.25)) { refreshing = false } } }
@@ -107,65 +81,76 @@ struct ShelvesPage: View {
         }
     }
 
-    private var scroller: some View {
-        ScrollView {
-            // Lazy: only the sections on screen (plus the lookahead) are built and laid out. The feed is
-            // open-ended, so an eager stack would build every loaded section, and its
-            // "load more" marker would fire at once (an eager stack creates every
-            // child immediately), pulling the whole feed in at launch.
-            LazyVStack(alignment: .leading, spacing: 34) {
-                Text(title).font(.system(size: 30, weight: .bold)).padding(.bottom, -14)
-                if let header { header }
-                if showChips, Prefs.shared.showHomeChips, let chips = page?.chips, !chips.isEmpty {
-                    // One full-width row when they fit; otherwise a single swipeable row
-                    // with arrows (never a second row).
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { chipButtons(chips) }
-                        ChipScroller(chips: chips, selected: chip?.title) { c in
-                            chip = chip?.title == c.title ? nil : c
-                        }
-                    }
-                }
-                if let page {
-                    let hidden = id == "home" ? Set(Prefs.shared.hiddenHomeSections) : []
-                    ForEach((page.shelves + extra).filter { !hidden.contains($0.title) }) { s in
-                        ShelfView(shelf: s, hideable: id == "home")
-                    }
-                    // Keeps going like YouTube: YouTube's own pages first, then an
-                    // endless "Because you listened to…" feed (see loadMore).
-                    if continuation != nil || canDiscover {
-                        ProgressView().frame(maxWidth: .infinity).padding()
-                            .onAppear { loadMore() }
-                            .id("more-\(extra.count)")
-                    }
-                    if id == "home", !prefs.hiddenHomeSections.isEmpty {
-                        HStack(spacing: 12) {
-                            Image(systemName: "eye.slash").foregroundStyle(.secondary)
-                            Text("\(prefs.hiddenHomeSections.count) hidden section\(prefs.hiddenHomeSections.count == 1 ? "" : "s")")
-                                .font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
-                            Menu {
-                                ForEach(prefs.hiddenHomeSections, id: \.self) { t in
-                                    Button("Show “\(t)”") { withAnimation { prefs.hiddenHomeSections.removeAll { $0 == t } } }
-                                }
-                                Divider()
-                                Button("Show All") { withAnimation { prefs.hiddenHomeSections = [] } }
-                            } label: { Label("Show Sections", systemImage: "eye") }
-                                .menuStyle(.button).buttonStyle(CapsuleButtonStyle(prominent: false)).menuIndicator(.hidden).fixedSize()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                    }
-                } else if let error {
-                    ErrorView(message: error) { self.error = nil; reload += 1 }
-                } else {
-                    LoadingView()
-                }
-            }
-            .pagePadding()
-            .padding(.bottom, Self.lookahead)
-            .background(ScrollOffsetObserver { pulled in updatePull(pulled) })
+    /// The page as feed rows (see FeedView): each is built ahead of time, off-scroll.
+    private func rows(for page: BrowsePage) -> [FeedRow] {
+        func padded<V: View>(_ v: V) -> AnyView { AnyView(v.padding(.horizontal, 28)) }
+        var out: [FeedRow] = []
+        out.append(FeedRow(id: "title", estimate: PageInsets.top + 36, spacing: 20) {
+            padded(Text(self.title).font(.system(size: 30, weight: .bold)).padding(.top, PageInsets.top))
+        })
+        if let header {
+            out.append(FeedRow(id: "header", estimate: 250, spacing: 34) { padded(header) })
         }
-        .contentMargins(.bottom, Self.lookahead, for: .scrollIndicators)
+        if showChips, prefs.showHomeChips, !page.chips.isEmpty {
+            let chips = page.chips
+            out.append(FeedRow(id: "chips", estimate: 40, spacing: 34) {
+                // One full-width row when they fit; otherwise a single swipeable row
+                // with arrows (never a second row).
+                padded(ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { self.chipButtons(chips) }
+                    ChipScroller(chips: chips, selected: self.chip?.title) { c in
+                        self.chip = self.chip?.title == c.title ? nil : c
+                    }
+                })
+            })
+        }
+        let hidden = id == "home" ? Set(prefs.hiddenHomeSections) : []
+        let hideable = id == "home"
+        for s in (page.shelves + extra) where !hidden.contains(s.title) {
+            let estimate: CGFloat = {
+                switch s.style {
+                case .cards: return 290
+                case .quickPicks: return 300
+                case .list: return 60 + CGFloat(min(s.items.count, 10)) * 56
+                case .moods: return 220
+                }
+            }()
+            out.append(FeedRow(id: s.id.uuidString, estimate: estimate, spacing: 34) {
+                padded(ShelfView(shelf: s, hideable: hideable))
+            })
+        }
+        // Keeps going like YouTube: YouTube's own pages first, then an endless
+        // "Because you listened to…" feed (see loadMore). The feed asks for more
+        // well before the end comes into view.
+        if continuation != nil || canDiscover {
+            out.append(FeedRow(id: "more", estimate: 52, spacing: 34) {
+                AnyView(ProgressView().frame(maxWidth: .infinity).padding())
+            })
+        }
+        if id == "home", !prefs.hiddenHomeSections.isEmpty {
+            let names = prefs.hiddenHomeSections
+            out.append(FeedRow(id: "hidden", estimate: 50, spacing: 0) {
+                padded(HStack(spacing: 12) {
+                    Image(systemName: "eye.slash").foregroundStyle(.secondary)
+                    Text("\(names.count) hidden section\(names.count == 1 ? "" : "s")")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                    Menu {
+                        ForEach(names, id: \.self) { t in
+                            Button("Show “\(t)”") { Prefs.shared.hiddenHomeSections.removeAll { $0 == t } }
+                        }
+                        Divider()
+                        Button("Show All") { Prefs.shared.hiddenHomeSections = [] }
+                    } label: { Label("Show Sections", systemImage: "eye") }
+                        .menuStyle(.button).buttonStyle(CapsuleButtonStyle(prominent: false)).menuIndicator(.hidden).fixedSize()
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10))
+            })
+        }
+        out.append(FeedRow(id: "bottom", estimate: PageInsets.bottom, spacing: 0) {
+            AnyView(Color.clear.frame(height: PageInsets.bottom))
+        })
+        return out
     }
 
     private func updatePull(_ pulled: CGFloat) {
