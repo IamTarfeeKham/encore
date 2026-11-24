@@ -154,6 +154,7 @@ final class WebBridge: NSObject, ObservableObject {
     func setVolume(_ v: Double) { Task { await js("window.__ytmac && window.__ytmac.volume(\(Int(v.rounded())))") } }
     func setRate(_ r: Double) { Task { await js("window.__ytmac && window.__ytmac.rate(\(r))") } }
     func setVideoMode(_ on: Bool) { Task { await js("window.__ytmac && window.__ytmac.videoMode(\(on))") } }
+    func setLoop(_ on: Bool) { Task { await js("window.__ytmac && window.__ytmac.setLoop(\(on))") } }
     func fade(to volume: Double, ms: Int) async { await js("window.__ytmac && window.__ytmac.fade(\(Int(volume.rounded())), \(ms))") }
     func requestHD() { Task { await js("window.__ytmac && window.__ytmac.hd()") } }
 
@@ -411,6 +412,8 @@ extension WebBridge {
           if (st.ac.state !== 'running') st.ac.resume();
           return 'ok';
         },
+        // Repeat one: the song restarts from here, a moment before it ends (see below).
+        setLoop(on) { window.__ytmacLoop = !!on; },
         // Smooth volume ramp (0–100) over ms, so switching streams never clicks.
         fade(target, ms) {
           const p = player(); if (!p || !p.setVolume) return;
@@ -473,6 +476,31 @@ extension WebBridge {
         post({ type, videoId: id, expected, time: e.target.currentTime, duration: e.target.duration });
       }, true);
       ['ended', 'playing', 'pause', 'error', 'waiting'].forEach(relay);
+
+      // Song endings are handled a moment before the media element actually ends, so
+      // YouTube's own autoplay never gets to start a different song first:
+      //  - repeat one: jump straight back to the start (a gapless loop);
+      //  - otherwise: tell the app now, so it loads the next song itself.
+      let endSentFor = null;
+      const endNow = (v) => {
+        if (window.__ytmacLoop) {
+          const p = player();
+          if (p && p.seekTo) p.seekTo(0, true); else v.currentTime = 0;
+          return;
+        }
+        let id = null; try { id = player().getVideoData().video_id; } catch (x) {}
+        if (endSentFor === id) return;
+        endSentFor = id;
+        post({ type: 'ended', videoId: id, expected, time: v.currentTime, duration: v.duration });
+      };
+      document.addEventListener('timeupdate', (e) => {
+        const v = e.target; if (!(v instanceof HTMLMediaElement)) return;
+        const d = v.duration, t = v.currentTime;
+        if (!isFinite(d) || d < 3) return;
+        if (d - t > 0.35) { endSentFor = null; return; }
+        endNow(v);
+      }, true);
+
 
       setInterval(() => {
         let id = null; try { id = player().getVideoData().video_id; } catch (x) {}

@@ -103,6 +103,7 @@ struct PlayerBar: View {
                 Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: { Image(systemName: "list.bullet") }
                     .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                     .hoverTip("Queue")
+                FadeControl()
                 Button { openWindow(id: "mini") } label: { Image(systemName: "pip") }
                     .hoverTip("Mini Player")
                 Button { withAnimation(.spring(duration: 0.45)) { model.showNowPlaying.toggle() } } label: {
@@ -488,5 +489,76 @@ struct CAProgressBar: NSViewRepresentable {
     func updateNSView(_ v: BarView, context: Context) {
         v.fraction = fraction; v.perSecond = perSecond
         v.apply()
+    }
+}
+
+/// Crossfade: a button beside the volume showing "song → song" (a faded note, an
+/// arrow, a solid note). Lit in the accent colour, with a dot underneath like shuffle
+/// and repeat, while it's on. Opens a slider (Off–12 s).
+struct FadeControl: View {
+    @EnvironmentObject var player: PlayerController
+    @State private var open = false
+
+    var body: some View {
+        let on = player.fadeSeconds > 0
+        Button { open.toggle() } label: {
+            HStack(spacing: 1) {
+                Image(systemName: "music.note").opacity(0.45)
+                Image(systemName: "arrow.right").font(.system(size: 8, weight: .heavy))
+                Image(systemName: "music.note")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(on ? Color.accentColor : .primary)
+        }
+        .buttonStyle(BarIconStyle(size: 12, diameter: 36))
+        .overlay(alignment: .bottom) {
+            if on { Circle().fill(Color.accentColor).frame(width: 4, height: 4).offset(y: 6) }
+        }
+        .hoverTip(on ? "Crossfade: \(Int(player.fadeSeconds)) s" : "Crossfade: Off")
+        .popover(isPresented: $open, arrowEdge: .top) {
+            FadePopover().environmentObject(player)
+        }
+    }
+}
+
+private struct FadePopover: View {
+    @EnvironmentObject var player: PlayerController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Crossfade").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text(player.fadeSeconds > 0 ? "\(Int(player.fadeSeconds)) s" : "Off")
+                    .font(.system(size: 13).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $player.fadeSeconds, in: 0...12, step: 1) {
+                EmptyView()
+            } minimumValueLabel: {
+                Text("Off").font(.system(size: 11)).foregroundStyle(.secondary)
+            } maximumValueLabel: {
+                Text("12 s").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Text("The song fades out over its last seconds and the next one fades in. On repeat one, it dips briefly and loops straight back to the start.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Toggle(isOn: $player.smartFade) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Smart").font(.system(size: 13, weight: .semibold))
+                    Text("Songs from the same album play straight through with no fade, short songs get a shorter fade, and fade-ins stay brief.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .disabled(player.fadeSeconds == 0)
+        }
+        .padding(16)
+        .frame(width: 290)
     }
 }

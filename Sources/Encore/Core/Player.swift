@@ -80,7 +80,26 @@ final class PlayerController: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuffering = false
     @Published var shuffle = false
-    @Published var repeatMode: RepeatMode = .off { didSet { save() } }
+    @Published var repeatMode: RepeatMode = .off { didSet { save(); bridge.setLoop(repeatMode == .one) } }
+    /// Fade between songs, in seconds (0 = off). The current song fades out over its
+    /// last seconds and the next one fades in; a song on repeat-one gets a shorter,
+    /// softer dip and loops straight back to the start.
+    @Published var fadeSeconds: Double = UserDefaults.standard.object(forKey: "fadeSeconds") as? Double ?? 0 {
+        didSet {
+            UserDefaults.standard.set(fadeSeconds, forKey: "fadeSeconds")
+        }
+    }
+    /// Smart crossfade: consecutive songs from the same album play gaplessly (no
+    /// fade), short songs get a proportionally short fade, and fade-ins stay brief.
+    @Published var smartFade: Bool = UserDefaults.standard.object(forKey: "smartFade") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(smartFade, forKey: "smartFade") }
+    }
+    private var fadingOut = false
+    /// This ending was left gapless (Smart, same album): the next song starts at full volume.
+    private var gaplessEnding = false
+    private var fadeInNextLoad = false
+    /// Fade length actually used: repeat-one dips half as long (at most 2 s).
+    private var effectiveFade: Double { repeatMode == .one ? min(fadeSeconds / 2, 2) : fadeSeconds }
     @Published var autoplay: Bool = UserDefaults.standard.object(forKey: "autoplay") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoplay, forKey: "autoplay") }
     }
@@ -133,6 +152,8 @@ final class PlayerController: ObservableObject {
                 guard let self else { return }
                 self.bridge.setVolume(self.muted ? 0 : self.volume)
                 if self.videoMode { self.bridge.setVideoMode(true) }
+                // A fresh page knows nothing of these yet.
+                self.bridge.setLoop(self.repeatMode == .one)
             }.store(in: &bag)
         restore()
     }
@@ -161,6 +182,7 @@ final class PlayerController: ObservableObject {
         }
         let buffering = s.state == 3 || (Date().timeIntervalSince(lastLoadAt) < 8 && !fresh)
         setBuffering(buffering)
+        if fresh { updateFade(time: s.time, duration: s.duration, playing: playing) }
         if playing, sleepAtEndOfTrack == false, let at = sleepAt, Date() >= at { fireSleep() }
     }
 
@@ -452,7 +474,53 @@ final class PlayerController: ObservableObject {
     private func trackEnded() {
         if sleepAtEndOfTrack { sleepAtEndOfTrack = false; fireSleep(); return }
         if repeatMode == .one { seek(to: 0); bridge.play(); return }
+        // The song faded out; let the next one fade in.
+        if fadingOut && !gaplessEnding { fadeInNextLoad = true }
         next()
+    }
+
+    /// Starts the fade-out near the end of a song, and fades back in when the song
+    /// loops (repeat one) or you seek back out of the fade.
+    private func updateFade(time: Double, duration: Double, playing: Bool) {
+        var len = effectiveFade
+        // Smart: never more than a tenth of the song.
+        if smartFade { len = min(len, duration * 0.1) }
+        guard len >= 0.5, playing else { return }
+        // The page restarts / ends the song 0.35 s early (see WebBridge).
+        let left = duration - 0.35 - time
+        if !fadingOut, left > 0, left <= len {
+            fadingOut = true
+            gaplessEnding = false
+            // Smart: the next song continues the same album (live albums, DJ mixes,
+            // concept albums run into each other), so play straight through.
+            if smartFade, repeatMode != .one, let cur = current, let next = upcoming, Self.sameAlbum(cur, next) {
+                gaplessEnding = true
+                PerfMonitor.note("crossfade: same album next, gapless")
+                return
+            }
+            PerfMonitor.note(String(format: "crossfade: fading out over %.1fs", left))
+            Task { await bridge.fade(to: 0, ms: Int(left * 1000)) }
+        } else if fadingOut, left > len + 1 {
+            // Looped back to the start, or you seeked back: fade in again.
+            fadingOut = false
+            if gaplessEnding { gaplessEnding = false; return }
+            let target = muted ? 0 : volume
+            PerfMonitor.note(String(format: "crossfade: looped/seeked back, fading in over %.1fs", len))
+            Task { await bridge.fade(to: target, ms: Int(len * 1000)) }
+        }
+    }
+
+    /// The song that plays after this one, if known.
+    private var upcoming: Track? {
+        guard let i = index else { return nil }
+        if i + 1 < queue.count { return queue[i + 1] }
+        return repeatMode == .all ? queue.first : nil
+    }
+
+    private static func sameAlbum(_ a: Track, _ b: Track) -> Bool {
+        guard let x = a.album, let y = b.album else { return false }
+        if let ix = x.browseId, let iy = y.browseId { return ix == iy }
+        return x.name == y.name && a.artistLine == b.artistLine
     }
 
     private func fetchMoreIfNeeded() async {
@@ -504,16 +572,23 @@ final class PlayerController: ObservableObject {
         let vid = t.videoId
         let fadeIn = pendingFadeIn
         pendingFadeIn = false
+        // After a song faded out by itself, the next one fades in over the fade length.
+        // Smart keeps fade-ins short, so a song's opening isn't held back for long.
+        let songFadeMs = fadeInNextLoad ? Int((smartFade ? min(effectiveFade, 2) : effectiveFade) * 1000) : 0
+        fadeInNextLoad = false
+        fadingOut = false
+        let loop = repeatMode == .one
         Task {
             await bridge.load(videoId: vid, start: start)
+            bridge.setLoop(loop)
             if !autoplay { bridge.pause() }
             // YouTube can reset the volume per video; always restore ours (faded in
             // after a Song↔Video switch so there's no jump).
             let target = muted ? 0 : volume
-            if fadeIn {
+            if fadeIn || songFadeMs > 0 {
                 bridge.setVolume(0)
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                await bridge.fade(to: target, ms: 380)
+                await bridge.fade(to: target, ms: max(380, songFadeMs))
             } else {
                 bridge.setVolume(target)
             }

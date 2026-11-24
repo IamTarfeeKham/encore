@@ -65,6 +65,15 @@ final class PerfMonitor: NSObject {
         }
     }
 
+    /// Developer notes (crossfade decisions etc.), written only while perfLog is on.
+    nonisolated static func note(_ s: String) {
+        guard UserDefaults.standard.bool(forKey: "perfLog") else { return }
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("perf.log")
+        let line = "\(Date()) \(s)\n"
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() }
+        else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+    }
+
     private func log(_ s: String) {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("perf.log")
         let line = "\(Date()) \(s)\n"
