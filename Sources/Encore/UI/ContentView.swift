@@ -6,6 +6,14 @@ struct ContentView: View {
     @ObservedObject private var search = SearchController.shared
     @Environment(\.openWindow) private var openWindow
     @State private var sidebarWidth: CGFloat = Prefs.shared.sidebarWidth
+    /// Whether the page's layout leaves room for the sidebar. Closing: drops at once
+    /// (the leaving sidebar covers the left while the page glides). Opening: the page
+    /// keeps its full width while it glides right with the sidebar (its right side
+    /// just runs past the window edge, so no empty strip ever shows there), and takes
+    /// its narrower width when the glide ends, where the two line up exactly.
+    @State private var roomForSidebar: Bool?
+    @State private var roomGeneration = 0
+    private var pageRoom: Bool { roomForSidebar ?? model.sidebarVisible }
 
     static let panelGap: CGFloat = 10
     static let topBarHeight: CGFloat = 52
@@ -36,17 +44,28 @@ struct ContentView: View {
                     // Opening: the page makes room at once and the panel slides into the
                     // gap. Closing: the panel slides away first, then the page widens
                     // (so a leaving panel never slides over the page).
-                    .padding(.leading, model.sidebarVisible ? sidebarWidth + Self.panelGap : 0)
+                    .padding(.leading, pageRoom ? sidebarWidth + Self.panelGap : 0)
                     // The queue floats on top as its own rounded panel; the page stays full
                     // width underneath (only the panel's shape covers it).
                     .padding(.horizontal, Self.panelGap)
-                    .animation(nil, value: model.sidebarVisible)
-                    // The page takes its new width at once, and a GPU-only transform
-                    // slides it from its old spot in step with the sidebar, so the
-                    // whole window moves together.
+                    .animation(nil, value: pageRoom)
+                    // A GPU-only transform glides the page in step with the sidebar, so
+                    // the whole window moves together (no per-frame layout).
                     .modifier(PanelNudge(progress: model.sidebarVisible ? 1 : 0,
-                                         shown: model.sidebarVisible,
+                                         room: pageRoom,
                                          distance: sidebarWidth + Self.panelGap))
+                    .onChange(of: model.sidebarVisible) { _, shown in
+                        roomGeneration += 1
+                        roomForSidebar = false
+                        guard shown else { return }
+                        let gen = roomGeneration
+                        // Once the glide has settled, make room for real (no animation).
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            guard gen == roomGeneration, model.sidebarVisible else { return }
+                            var t = Transaction(); t.disablesAnimations = true
+                            withTransaction(t) { roomForSidebar = true }
+                        }
+                    }
 
                 ResizableSidebar()
                     .padding(.top, Self.topBarHeight + 6)
@@ -722,14 +741,17 @@ struct SidebarWidthKey: PreferenceKey {
 /// `shown` is the new state, applied instantly.
 struct PanelNudge: GeometryEffect {
     var progress: CGFloat
-    var shown: Bool
+    /// Whether the page's layout already leaves room for the sidebar.
+    var room: Bool
     var distance: CGFloat
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }
     func effectValue(size: CGSize) -> ProjectionTransform {
-        let x = shown ? -distance * (1 - progress) : distance * progress
+        // Visual left edge follows the sidebar (distance × progress); subtract
+        // the room the layout already leaves.
+        let x = distance * progress - (room ? distance : 0)
         return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
     }
 }
