@@ -136,21 +136,49 @@ struct ExplicitBadge: View {
 
 // MARK: - Animated "now playing" bars
 
-struct PlayingBars: View {
+/// "Now playing" bars, animated by Core Animation (no per-frame app work).
+struct PlayingBars: NSViewRepresentable {
     var animating: Bool
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 12, paused: !animating)) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .bottom, spacing: 1.5) {
-                ForEach(0..<3) { i in
-                    RoundedRectangle(cornerRadius: 1)
-                        .frame(width: 2.5, height: animating ? 4 + 8 * abs(sin(t * (3.1 + Double(i) * 1.3) + Double(i))) : 4)
+
+    final class BarsView: NSView {
+        let bars = (0..<3).map { _ in CALayer() }
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            bars.forEach { $0.anchorPoint = CGPoint(x: 0.5, y: 0); $0.cornerRadius = 1; layer?.addSublayer($0) }
+        }
+        required init?(coder: NSCoder) { fatalError() }
+        override var intrinsicContentSize: NSSize { NSSize(width: 12, height: 12) }
+        override var isFlipped: Bool { false }
+        func update(color: CGColor, animating: Bool) {
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            for (i, b) in bars.enumerated() {
+                b.backgroundColor = color
+                b.bounds = CGRect(x: 0, y: 0, width: 2.5, height: 4)
+                b.position = CGPoint(x: 1.25 + CGFloat(i) * 4, y: 0)
+                if animating {
+                    if b.animation(forKey: "h") == nil {
+                        let a = CABasicAnimation(keyPath: "bounds.size.height")
+                        a.fromValue = 3; a.toValue = 12
+                        a.duration = 0.32 + Double(i) * 0.11
+                        a.autoreverses = true; a.repeatCount = .infinity
+                        a.timeOffset = Double(i) * 0.13
+                        a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                        b.add(a, forKey: "h")
+                    }
+                } else {
+                    b.removeAnimation(forKey: "h")
                 }
             }
-            .frame(width: 12, height: 12, alignment: .bottom)
-            .foregroundStyle(Color.accentColor)
+            CATransaction.commit()
         }
     }
+
+    func makeNSView(context: Context) -> BarsView { BarsView() }
+    func updateNSView(_ v: BarsView, context: Context) {
+        v.update(color: NSColor(Prefs.shared.accentColor).cgColor, animating: animating)
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: BarsView, context: Context) -> CGSize? { CGSize(width: 12, height: 12) }
 }
 
 // MARK: - Track row

@@ -71,7 +71,6 @@ extension View {
         return self
             .background(Color.white.opacity(0.06), in: shape)
             .background(.regularMaterial, in: shape)
-            .shadow(color: .black.opacity(0.25), radius: 18, y: 8)
             .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.28), .white.opacity(0.06)],
                                                        startPoint: .top, endPoint: .bottom), lineWidth: 0.7))
     }
@@ -338,7 +337,11 @@ struct WindowConfigurator: NSViewRepresentable {
         let v = NSView()
         DispatchQueue.main.async {
             guard let w = v.window else { return }
-            w.isMovableByWindowBackground = true
+            // Not movable by background: with that on, AppKit recomputes the window's
+            // drag region over every view on each update (5×/s during playback),
+            // which was most of the app's CPU while playing. The top bar is the drag
+            // area instead (WindowDragArea), like a native title bar.
+            w.isMovableByWindowBackground = false
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
             w.styleMask.insert(.fullSizeContentView)
@@ -612,4 +615,23 @@ extension View {
 /// Motion used for sliding panels (sidebar, queue): a soft, slightly fluid spring.
 enum Motion {
     static let panel = Animation.spring(response: 0.42, dampingFraction: 0.86)
+}
+
+
+/// Drag the window from here (the top bar's empty space), like a title bar.
+/// Double-click zooms the window, following the system setting.
+struct WindowDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+                if action == "Minimize" { window?.performMiniaturize(nil) } else if action != "None" { window?.performZoom(nil) }
+                return
+            }
+            window?.performDrag(with: event)
+        }
+        override var mouseDownCanMoveWindow: Bool { true }
+    }
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

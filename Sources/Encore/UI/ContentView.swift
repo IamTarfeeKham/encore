@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject private var search = SearchController.shared
     @Environment(\.openWindow) private var openWindow
+    @State private var sidebarWidth: CGFloat = Prefs.shared.sidebarWidth
 
     static let panelGap: CGFloat = 10
     static let topBarHeight: CGFloat = 52
@@ -16,45 +17,68 @@ struct ContentView: View {
 
                 // Pages run the full height of the window and scroll underneath the
                 // floating glass top bar and player bar, so the glass shows them through it.
-                HStack(spacing: Self.panelGap) {
-                    if model.sidebarVisible {
-                        ResizableSidebar()
-                            .padding(.top, Self.topBarHeight + 6)
-                            .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                    }
-                    DetailPane()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // When a panel opens or closes, the page takes its new width in
-                        // one step instead of re-laying out every frame of the slide
-                        // (that per-frame re-layout of long lists was the jitter).
-                        .animation(nil, value: model.sidebarVisible)
-                        .animation(nil, value: model.showQueue)
-                        // Content fades out softly as it scrolls up under the top bar (no band, no border).
-                        .mask {
-                            VStack(spacing: 0) {
-                                Color.clear.frame(height: Self.topBarHeight - 8)
-                                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                                    .frame(height: 26)
-                                Color.black
-                            }
+                //
+                // Sidebar and queue are always mounted and slide in/out with a GPU-only
+                // offset (no re-creation, no per-frame layout). The page changes width
+                // once, then glides into place with the sidebar (PanelNudge), so the
+                // motion is smooth at the display's full frame rate.
+                DetailPane()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Content fades out softly as it scrolls up under the top bar (no band, no border).
+                    .mask {
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: Self.topBarHeight - 8)
+                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                                .frame(height: 26)
+                            Color.black
                         }
-                    if model.showQueue && !model.showNowPlaying {
-                        // Hugs its content (a short queue gets a short panel), up to the space available.
-                        QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
-                            .frame(width: 320)
-                            .readablePanel(20)
-                            .padding(.top, Self.topBarHeight + 6)
-                            .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
-                }
-                .padding(.horizontal, Self.panelGap)
+                    // Opening: the page makes room at once and the panel slides into the
+                    // gap. Closing: the panel slides away first, then the page widens
+                    // (so a leaving panel never slides over the page).
+                    .padding(.leading, model.sidebarVisible ? sidebarWidth + Self.panelGap : 0)
+                    // The queue floats on top as its own rounded panel; the page stays full
+                    // width underneath (only the panel's shape covers it).
+                    .padding(.horizontal, Self.panelGap)
+                    .animation(nil, value: model.sidebarVisible)
+                    // The page takes its new width at once, and a GPU-only transform
+                    // slides it from its old spot in step with the sidebar, so the
+                    // whole window moves together.
+                    .modifier(PanelNudge(progress: model.sidebarVisible ? 1 : 0,
+                                         shown: model.sidebarVisible,
+                                         distance: sidebarWidth + Self.panelGap))
+
+                ResizableSidebar()
+                    .padding(.top, Self.topBarHeight + 6)
+                    .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
+                    .padding(.leading, Self.panelGap)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .offset(x: model.sidebarVisible ? 0 : -(sidebarWidth + Self.panelGap * 3))
+                    .allowsHitTesting(model.sidebarVisible)
+                    .onPreferenceChange(SidebarWidthKey.self) { w in
+                        if abs(w - sidebarWidth) > 0.5 { sidebarWidth = w }
+                    }
+
+                // Hugs its content (a short queue gets a short panel), up to the space
+                // available. Above Now Playing when that's open.
+                QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
+                    .frame(width: 320)
+                    .readablePanel(20)
+                    .padding(.top, Self.topBarHeight + 6)
+                    .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
+                    .padding(.trailing, Self.panelGap)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    // Fades rather than slides: moving the queue's native list moves every
+                    // row view each frame (AppKit layout per frame); a fade changes no
+                    // geometry at all, so it stays smooth.
+                    .opacity(model.showQueue ? 1 : 0)
+                    .allowsHitTesting(model.showQueue)
+                    .zIndex(model.showNowPlaying ? 1.5 : 0.25)
 
                 VStack {
                     TopBar()
                         .frame(height: Self.topBarHeight)
+                        .background(WindowDragArea())
                     Spacer()
                 }
                 .zIndex(0.3)
@@ -85,24 +109,6 @@ struct ContentView: View {
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                 removal: .move(edge: .bottom).combined(with: .opacity)))
                         .zIndex(1)
-                }
-
-                // With Now Playing open, the queue floats above it on the right
-                // (it used to open underneath, hidden).
-                if model.showNowPlaying && model.showQueue {
-                    HStack {
-                        Spacer(minLength: 0)
-                        QueueView(maxHeight: geo.size.height - (Self.topBarHeight + 6) - (PlayerBar.height + Self.panelGap * 2))
-                            .frame(width: 320)
-                            .readablePanel(20)
-                            .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
-                            .padding(.top, Self.topBarHeight + 6)
-                            .padding(.bottom, PlayerBar.height + Self.panelGap * 2)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                    }
-                    .padding(.horizontal, Self.panelGap)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .zIndex(1.5)
                 }
 
                 PlayerBar()
@@ -665,6 +671,7 @@ struct ResizableSidebar: View {
                 .animation(.easeInOut(duration: 0.25), value: height)
         }
         .frame(width: width)
+        .preference(key: SidebarWidthKey.self, value: width)
         .onPreferenceChange(SidebarContentHeight.self) { h in
             if abs(h - contentHeight) > 0.5 { contentHeight = h; ResizableSidebar.lastContentHeight = h }
         }
@@ -699,5 +706,30 @@ extension String {
         if hasSuffix(".fill") { return self }
         let f = self + ".fill"
         return NSImage(systemSymbolName: f, accessibilityDescription: nil) != nil ? f : self
+    }
+}
+
+
+/// The sidebar's live width, so the page can make room for it.
+struct SidebarWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+
+/// Slides the page from where it was to where it now is, as a GPU transform only
+/// (no layout), in step with the sidebar animation. `progress` animates 0↔1;
+/// `shown` is the new state, applied instantly.
+struct PanelNudge: GeometryEffect {
+    var progress: CGFloat
+    var shown: Bool
+    var distance: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        let x = shown ? -distance * (1 - progress) : distance * progress
+        return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
     }
 }

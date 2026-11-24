@@ -68,6 +68,7 @@ struct NowPlayingView: View {
         .padding(.horizontal, 20)
         // Row centre at half the top-bar height, level with the window buttons.
         .frame(height: ContentView.topBarHeight)
+        .background(WindowDragArea())
     }
 
     private var currentItem: MediaItem? {

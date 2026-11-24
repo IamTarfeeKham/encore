@@ -41,7 +41,9 @@ final class PlaybackClock: ObservableObject {
             anchorTime = now() + error * 0.2; anchorDate = Date()
         }
         rate = r
-        if abs(time - measured) > 0.05 { time = measured }
+        // Publish only when the shown second changes (or on a jump): every publish
+        // redraws the window, and the moving parts animate on their own.
+        if Int(time) != Int(measured) || abs(time - measured) > 1 { time = measured }
     }
 
     func jump(to t: Double) {

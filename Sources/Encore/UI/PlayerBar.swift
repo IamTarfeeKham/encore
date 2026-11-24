@@ -213,7 +213,18 @@ struct ScrubberBar: View {
             GeometryReader { g in
                 let w = g.size.width
                 let active = hover || dragValue != nil
-                TimelineView(.animation(minimumInterval: active ? 1 / 60 : 1 / 8, paused: !player.isPlaying || dragValue != nil)) { tl in
+                Group {
+                if !active {
+                    // At rest: Core Animation glides the bar on its own, so playback
+                    // costs no per-frame work in the app. Re-synced each second.
+                    let t = clock.now()
+                    CAProgressBar(fraction: clock.duration > 0 ? t / clock.duration : 0,
+                                  perSecond: player.isPlaying && clock.duration > 0 ? clock.rate / clock.duration : 0,
+                                  syncTick: Int(clock.time) &+ clock.epoch)
+                        .frame(height: 4)
+                        .frame(maxHeight: .infinity)
+                } else {
+                TimelineView(.animation(minimumInterval: 1 / 60, paused: !player.isPlaying || dragValue != nil)) { tl in
                     let t = dragValue ?? clock.now(tl.date)
                     let p = clock.duration > 0 ? max(0, min(1, t / clock.duration)) : 0
                     ZStack(alignment: .leading) {
@@ -229,6 +240,8 @@ struct ScrubberBar: View {
                             .offset(x: p * w - (active ? 7.5 : 0))
                     }
                     .frame(maxHeight: .infinity)
+                }
+                }
                 }
                 .overlay(alignment: .topLeading) {
                     if let hx = hoverX, dragValue == nil, clock.duration > 0 {
@@ -418,5 +431,61 @@ struct PlayTriangle: Shape {
         p.addQuadCurve(to: CGPoint(x: r.minX + k * 0.4, y: r.maxY - k), control: CGPoint(x: r.minX, y: r.maxY))
         p.closeSubpath()
         return p
+    }
+}
+
+
+/// A slim progress bar animated entirely by Core Animation: given where playback is
+/// and how fast it moves, the fill glides to the end by itself (no app work per frame).
+struct CAProgressBar: NSViewRepresentable {
+    var fraction: Double
+    var perSecond: Double
+    var syncTick: Int
+
+    final class BarView: NSView {
+        let track = CALayer(), fill = CALayer()
+        var fraction = 0.0, perSecond = 0.0
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layer?.addSublayer(track); layer?.addSublayer(fill)
+            fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+        override func layout() { super.layout(); apply() }
+        override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); apply() }
+
+        func apply() {
+            let b = bounds
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                track.backgroundColor = NSColor.labelColor.withAlphaComponent(0.16).cgColor
+                fill.backgroundColor = NSColor.labelColor.withAlphaComponent(0.7).cgColor
+            }
+            track.frame = b
+            track.cornerRadius = b.height / 2
+            fill.cornerRadius = b.height / 2
+            let f = max(0, min(1, fraction))
+            let w0 = max(4, b.width * f)
+            fill.bounds = CGRect(x: 0, y: 0, width: w0, height: b.height)
+            fill.position = CGPoint(x: 0, y: b.midY)
+            fill.removeAnimation(forKey: "p")
+            CATransaction.commit()
+            guard perSecond > 0, f < 1, b.width > 0 else { return }
+            let anim = CABasicAnimation(keyPath: "bounds.size.width")
+            anim.fromValue = w0
+            anim.toValue = b.width
+            anim.duration = (1 - f) / perSecond
+            anim.timingFunction = CAMediaTimingFunction(name: .linear)
+            anim.fillMode = .forwards
+            anim.isRemovedOnCompletion = false
+            fill.add(anim, forKey: "p")
+        }
+    }
+
+    func makeNSView(context: Context) -> BarView { BarView() }
+    func updateNSView(_ v: BarView, context: Context) {
+        v.fraction = fraction; v.perSecond = perSecond
+        v.apply()
     }
 }

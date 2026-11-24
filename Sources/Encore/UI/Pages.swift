@@ -42,9 +42,11 @@ struct ShelvesPage: View {
 
     var body: some View {
         ScrollView {
-            // Eager VStack: shelves are built once up front instead of being
-            // created mid-scroll, which is what caused hitches.
-            VStack(alignment: .leading, spacing: 34) {
+            // Lazy: only the sections on screen are built and laid out. The feed is
+            // open-ended, so an eager stack would build every loaded section, and its
+            // "load more" marker would fire at once (an eager stack creates every
+            // child immediately), pulling the whole feed in at launch.
+            LazyVStack(alignment: .leading, spacing: 34) {
                 Text(title).font(.system(size: 30, weight: .bold)).padding(.bottom, -14)
                 if let header { header }
                 if showChips, Prefs.shared.showHomeChips, let chips = page?.chips, !chips.isEmpty {
@@ -285,7 +287,9 @@ struct CollectionView: View {
     /// stacked (cover above details) when the window or pane is narrow.
     @ViewBuilder private func header(_ p: CollectionPage) -> some View {
         let compact = pageWidth < 700
-        let side: CGFloat = compact ? 168 : (pageWidth > 1100 ? 260 : 220)
+        // Fixed cover size (it used to jump between 220 and 260 as the page width
+        // changed, e.g. when the sidebar or queue opened).
+        let side: CGFloat = compact ? 168 : 240
         let cover = Artwork(url: p.thumbnail.map { Thumbs.upscale($0, size: 600) }, cornerRadius: 16, aspect: 1, size: side)
             .frame(width: side, height: side)
             .shadow(color: .black.opacity(0.3), radius: 18, y: 10)
@@ -575,7 +579,7 @@ struct LibraryView: View {
                     } else if section == .artists || section == .subscriptions {
                         LazyVStack(spacing: 0) { ForEach(items) { CollectionRow(item: $0) } }
                     } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 20, alignment: .top)], spacing: 26) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 176, maximum: 176), spacing: 20, alignment: .top)], spacing: 26) {
                             ForEach(items) { CardView(item: $0, width: 170) }
                         }
                     }
@@ -670,7 +674,7 @@ struct SearchView: View {
         if items.isEmpty {
             ContentUnavailableView.search(text: query)
         } else if isGrid {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 20, alignment: .top)], spacing: 26) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 176, maximum: 176), spacing: 20, alignment: .top)], spacing: 26) {
                 ForEach(items) { CardView(item: $0, width: 170) }
             }
         } else {

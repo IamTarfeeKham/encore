@@ -30,7 +30,7 @@ struct SpeedDialView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardSurface(16)
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 112, maximum: 150), spacing: 14, alignment: .top)],
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 136, maximum: 136), spacing: 14, alignment: .top)],
                               alignment: .leading, spacing: 16) {
                         ForEach(tiles) { item in
                             SpeedDialTile(item: item, pinned: store.contains(item))

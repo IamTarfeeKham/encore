@@ -500,6 +500,13 @@ extension WebBridge {
         html.ytmac-video .ytp-chrome-bottom, html.ytmac-video .ytp-chrome-top, html.ytmac-video .ytp-gradient-bottom,
         html.ytmac-video .ytp-gradient-top, html.ytmac-video .ytp-pause-overlay, html.ytmac-video .song-media-controls { display: none !important; }
         html.ytmac-video body { overflow: hidden !important; background: #000 !important; }
+        /* Nobody sees this page: skip rendering YouTube's own feed, search page,
+           sidebar and top bar (artwork grids etc.) so the hidden page uses less
+           memory and CPU. The player itself is untouched. */
+        ytmusic-browse-response, ytmusic-search-page, ytmusic-guide-renderer, #guide-wrapper,
+        ytmusic-nav-bar, ytmusic-tab-renderer #contents {
+          content-visibility: hidden !important; contain-intrinsic-size: 0 0 !important;
+        }
       `;
       (document.head || document.documentElement).appendChild(s);
     })();

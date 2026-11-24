@@ -13,6 +13,7 @@ final class PerfMonitor: NSObject {
     private var worst: CFTimeInterval = 0
     private var windowStart = Date()
     private var expected: CFTimeInterval = 1.0 / 60
+    private let logAll = UserDefaults.standard.bool(forKey: "perfLogAll")
 
     func start(in view: NSView) {
         guard UserDefaults.standard.bool(forKey: "perfLog"), link == nil else { return }
@@ -26,13 +27,14 @@ final class PerfMonitor: NSObject {
         expected = max(l.targetTimestamp - l.timestamp, 1.0 / 240)
         let now = l.timestamp
         defer { last = now }
-        guard last > 0, ScrollActivity.isScrolling else { return }
+        // perfLogAll: measure every frame (e.g. panel animations), not just scrolling.
+        guard last > 0, ScrollActivity.isScrolling || logAll else { return }
         let dt = now - last
         frames += 1
         if dt > expected * 1.6 { hitches += 1 }
         worst = max(worst, dt)
         if Date().timeIntervalSince(windowStart) > 2 {
-            log(String(format: "scroll: %d frames, %d hitches, worst %.1f ms, display %.0f Hz",
+            log(String(format: "frames: %d frames, %d hitches, worst %.1f ms, display %.0f Hz",
                        frames, hitches, worst * 1000, 1 / expected))
             frames = 0; hitches = 0; worst = 0; windowStart = Date()
         }
