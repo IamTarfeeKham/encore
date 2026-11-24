@@ -41,28 +41,35 @@ struct ShelvesPage: View {
     @ObservedObject private var prefs = Prefs.shared
 
     var body: some View {
-        ScrollView {
-            // Lazy: only the sections on screen are built and laid out. The feed is
-            // open-ended, so an eager stack would build every loaded section, and its
-            // "load more" marker would fire at once (an eager stack creates every
-            // child immediately), pulling the whole feed in at launch.
-            LazyVStack(alignment: .leading, spacing: 34) {
-                Text(title).font(.system(size: 30, weight: .bold)).padding(.bottom, -14)
-                if let header { header }
-                if showChips, Prefs.shared.showHomeChips, let chips = page?.chips, !chips.isEmpty {
-                    // One full-width row when they fit; otherwise a single swipeable row
-                    // with arrows (never a second row).
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 8) { chipButtons(chips) }
-                        ChipScroller(chips: chips, selected: chip?.title) { c in
-                            chip = chip?.title == c.title ? nil : c
+        Group {
+            if let page {
+                // A native recycling list (like YouTube's feed): only about a screenful of
+                // row views exist; as a section scrolls off one edge its row view is
+                // reused for the one coming in at the other edge. Cost stays flat however
+                // long the endless feed gets. Spacing lives inside rows (a row's large
+                // insets were mirrored below it by the list).
+                List {
+                    Text(title).font(.system(size: 30, weight: .bold))
+                        .padding(.top, PageInsets.top).padding(.bottom, 20)
+                        .listChrome()
+                    if let header { header.padding(.bottom, 34).listChrome() }
+                    if showChips, Prefs.shared.showHomeChips, !page.chips.isEmpty {
+                        // One full-width row when they fit; otherwise a single swipeable row
+                        // with arrows (never a second row).
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) { chipButtons(page.chips) }
+                            ChipScroller(chips: page.chips, selected: chip?.title) { c in
+                                chip = chip?.title == c.title ? nil : c
+                            }
                         }
+                        .padding(.bottom, 34)
+                        .listChrome()
                     }
-                }
-                if let page {
                     let hidden = id == "home" ? Set(Prefs.shared.hiddenHomeSections) : []
                     ForEach((page.shelves + extra).filter { !hidden.contains($0.title) }) { s in
                         ShelfView(shelf: s, hideable: id == "home")
+                            .padding(.bottom, 34)
+                            .listChrome()
                     }
                     // Keeps going like YouTube: YouTube's own pages first, then an
                     // endless "Because you listened to…" feed (see loadMore).
@@ -70,6 +77,7 @@ struct ShelvesPage: View {
                         ProgressView().frame(maxWidth: .infinity).padding()
                             .onAppear { loadMore() }
                             .id("more-\(extra.count)")
+                            .listChrome()
                     }
                     if id == "home", !prefs.hiddenHomeSections.isEmpty {
                         HStack(spacing: 12) {
@@ -87,14 +95,18 @@ struct ShelvesPage: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
+                        .listChrome()
                     }
-                } else if let error {
-                    ErrorView(message: error) { self.error = nil; reload += 1 }
-                } else {
-                    LoadingView()
+                    Color.clear.frame(height: PageInsets.bottom).listChrome()
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 1)
+            } else if let error {
+                ErrorView(message: error) { self.error = nil; reload += 1 }
+            } else {
+                LoadingView()
             }
-            .pagePadding()
         }
         .task(id: "\(id)|\(chip?.title ?? "")|\(reload)") {
             do {

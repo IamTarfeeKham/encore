@@ -101,8 +101,50 @@ enum ScrollActivity {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                 if Date().timeIntervalSince(lastEvent) >= 0.17 { isScrolling = false }
             }
+            return MainActor.assumeIsolated { forwardVertical(e) }
+        }
+    }
+
+    /// A horizontal carousel inside a List (an NSTableView) swallows vertical
+    /// mouse-wheel scrolls, so the page wouldn't move while the pointer is over
+    /// a row of artwork. Mostly-vertical scrolls over a scroll view that can't
+    /// scroll vertically go to the nearest one that can. The decision is held
+    /// for a whole trackpad gesture so a swipe never switches target midway.
+    private static var gestureTarget: NSScrollView?
+    private static var gestureForwarding = false
+
+    @MainActor
+    private static func forwardVertical(_ e: NSEvent) -> NSEvent? {
+        let inGesture = !e.phase.isEmpty || !e.momentumPhase.isEmpty
+        if inGesture && !e.phase.contains(.began) && !e.phase.contains(.mayBegin) {
+            // Continue whatever was decided when this gesture began.
+            if gestureForwarding, let t = gestureTarget {
+                t.scrollWheel(with: e)
+                if e.momentumPhase.contains(.ended) || e.phase.contains(.cancelled) { gestureForwarding = false; gestureTarget = nil }
+                return nil
+            }
             return e
         }
+        gestureForwarding = false; gestureTarget = nil
+        guard abs(e.scrollingDeltaY) > abs(e.scrollingDeltaX),
+              let content = e.window?.contentView,
+              let hit = content.hitTest(content.convert(e.locationInWindow, from: nil)) else { return e }
+        var v: NSView? = hit
+        var sawHorizontalOnly = false
+        while let cur = v {
+            if let sv = cur as? NSScrollView, let doc = sv.documentView {
+                let canScrollVertically = doc.frame.height > sv.contentView.bounds.height + 1
+                if canScrollVertically {
+                    guard sawHorizontalOnly else { return e }   // normal case: it handles it
+                    if inGesture { gestureForwarding = true; gestureTarget = sv }
+                    sv.scrollWheel(with: e)
+                    return nil
+                }
+                sawHorizontalOnly = true
+            }
+            v = cur.superview
+        }
+        return e
     }
 }
 

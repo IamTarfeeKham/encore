@@ -12,7 +12,7 @@ actor ImageLoader {
     private var inflight: [String: Task<CGImage?, Never>] = [:]
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
-        c.urlCache = URLCache(memoryCapacity: 48 << 20, diskCapacity: 512 << 20,
+        c.urlCache = URLCache(memoryCapacity: 16 << 20, diskCapacity: 512 << 20,
                               directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                                 .appendingPathComponent("images"))
         c.requestCachePolicy = .returnCacheDataElseLoad
@@ -20,10 +20,11 @@ actor ImageLoader {
         return URLSession(configuration: c)
     }()
 
-    /// Decoded-image cache (NSCache is thread-safe), ~160 MB of pixels.
+    /// Decoded-image cache (NSCache is thread-safe), ~96 MB of pixels: enough for the
+    /// screen and the sections near it; anything older re-decodes from the disk cache.
     nonisolated(unsafe) static let sharedCache: NSCache<NSString, CGImageBox> = {
         let c = NSCache<NSString, CGImageBox>()
-        c.totalCostLimit = 160 << 20
+        c.totalCostLimit = 96 << 20
         return c
     }()
 
