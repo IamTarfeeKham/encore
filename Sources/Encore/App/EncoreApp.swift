@@ -246,6 +246,7 @@ final class WebHost {
 struct PlayerCommands: Commands {
     @ObservedObject var player: PlayerController
     @ObservedObject var model: AppModel
+    @ObservedObject var sidebarState = SidebarState.shared
     @ObservedObject var shortcuts = ShortcutStore.shared
     @Environment(\.openWindow) private var openWindow
 

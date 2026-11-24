@@ -1059,6 +1059,7 @@ struct ChipScroller: View {
                         .disabled(index + perPage >= chips.count)
                 }
                 .buttonStyle(BarIconStyle(size: 13))
+                .pinnedToTrailingEdge()
             }
         }
         .frame(height: 34)

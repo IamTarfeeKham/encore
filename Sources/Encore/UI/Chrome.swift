@@ -6,6 +6,7 @@ import SwiftUI
 /// the centre, settings and account on the right.
 struct TopBar: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var sidebarState = SidebarState.shared
 
     /// Visual gap between neighbouring glyphs, used throughout the bar.
     static let gap: CGFloat = 20

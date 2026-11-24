@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import QuartzCore
 
 /// Optional frame-pacing logger (enable with `defaults write local.ytmusicmac perfLog -bool YES`).
@@ -14,6 +15,10 @@ final class PerfMonitor: NSObject {
     private var windowStart = Date()
     private var expected: CFTimeInterval = 1.0 / 60
     private let logAll = UserDefaults.standard.bool(forKey: "perfLogAll")
+    /// Frames during a measured animation (the 0.7 s after a test toggle).
+    private var animStart: CFTimeInterval = 0
+    private var animFrames = 0, animHitches = 0
+    private var animWorst: CFTimeInterval = 0
 
     func start(in view: NSView) {
         guard UserDefaults.standard.bool(forKey: "perfLog"), link == nil else { return }
@@ -21,6 +26,16 @@ final class PerfMonitor: NSObject {
         l.add(to: .main, forMode: .common)
         link = l
         log("started")
+        // Measurement hook (only while perfLog is on): a script can toggle the
+        // sidebar without keyboard focus or accessibility queries skewing results.
+        DistributedNotificationCenter.default().addObserver(forName: .init("local.ytmusicmac.perf.toggleSidebar"),
+                                                            object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                self.log("toggle sidebar")
+                self.animStart = CACurrentMediaTime(); self.animFrames = 0; self.animHitches = 0; self.animWorst = 0
+                withAnimation(Motion.panel) { AppModel.shared.sidebarVisible.toggle() }
+            }
+        }
     }
 
     @objc private func tick(_ l: CADisplayLink) {
@@ -33,6 +48,16 @@ final class PerfMonitor: NSObject {
         frames += 1
         if dt > expected * 1.6 { hitches += 1 }
         worst = max(worst, dt)
+        if animStart > 0 {
+            if now - animStart < 0.7 {
+                animFrames += 1
+                if dt > expected * 1.6 { animHitches += 1 }
+                animWorst = max(animWorst, dt)
+            } else {
+                log(String(format: "anim: %d frames, %d hitches, worst %.1f ms", animFrames, animHitches, animWorst * 1000))
+                animStart = 0
+            }
+        }
         if Date().timeIntervalSince(windowStart) > 2 {
             log(String(format: "frames: %d frames, %d hitches, worst %.1f ms, display %.0f Hz",
                        frames, hitches, worst * 1000, 1 / expected))

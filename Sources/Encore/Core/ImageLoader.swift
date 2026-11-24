@@ -94,7 +94,31 @@ actor ImageLoader {
         let blurred = saturated.clampedToExtent()
             .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: extent.width * 0.09])
             .cropped(to: extent)
-        return ciContext.createCGImage(blurred, from: extent)
+        // Keep the artwork's overall brightness. Blurring spreads a small bright spot
+        // (a light flare on a mostly black cover) over the whole picture, and the
+        // saturation boost and the additive layers amplify it, so a dark cover came out
+        // as a light background. Dark covers are scaled down to match their own average
+        // brightness; covers of medium brightness or brighter are left as they were.
+        let k = toneScale(for: input, extent: extent)
+        let toned = k < 0.999
+            ? blurred.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: k, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: k, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: k, w: 0),
+            ])
+            : blurred
+        return ciContext.createCGImage(toned, from: extent)
+    }
+
+    /// Brightness factor for the ambient image: 1 for covers whose average luminance is
+    /// 0.42 or more, scaling down to 0.3 for very dark covers.
+    nonisolated private static func toneScale(for image: CIImage, extent: CGRect) -> CGFloat {
+        let avg = image.applyingFilter("CIAreaAverage", parameters: [kCIInputExtentKey: CIVector(cgRect: extent)])
+        var px = [UInt8](repeating: 0, count: 4)
+        ciContext.render(avg, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                         format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
+        let lum = (0.2126 * Double(px[0]) + 0.7152 * Double(px[1]) + 0.0722 * Double(px[2])) / 255
+        return CGFloat(min(1, max(0.3, lum / 0.42)))
     }
 }
 

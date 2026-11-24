@@ -81,6 +81,8 @@ struct CardView: View {
 
     private var isRound: Bool { item.kind == .artist }
     private var aspect: CGFloat { item.kind == .video ? 16 / 9 : 1 }
+    /// Title (13 pt, one line) + 2 pt + subtitle (12 pt, up to two lines).
+    static let textHeight: CGFloat = 50
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -113,6 +115,10 @@ struct CardView: View {
             }
             .frame(width: width, alignment: isRound ? .center : .leading)
         }
+        // A fixed size (cover + room for a title and a two-line subtitle), so a
+        // carousel never has to measure its cards — on every frame of a window resize
+        // or while scrolling that measuring was the main cost.
+        .frame(width: width, height: width / aspect + 6 + Self.textHeight, alignment: .top)
         .contentShape(Rectangle())
         .onHover { h in
             // Ignore hover changes caused by content scrolling under a still pointer.
@@ -312,6 +318,7 @@ struct TrackRow: View {
                 .opacity(hover ? 1 : 0.4)
             }
             .fixedSize()
+            .pinnedToTrailingEdge()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -385,6 +392,7 @@ struct ShelfView: View {
     /// carousel doesn't re-render the shelf every frame.
     @State private var pageIndex = 0
     @State private var scrollRequest: Int?
+    @Environment(\.carouselOverhangWidth) private var overhang
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -442,6 +450,7 @@ struct ShelfView: View {
                 }
             }
             .buttonStyle(BarIconStyle(size: 12))
+            .pinnedToTrailingEdge()
         }
     }
 
@@ -453,14 +462,18 @@ struct ShelfView: View {
     }
 
     private var cards: some View {
-        ScrollViewReader { proxy in
+        OverhangLayout(width: overhang) { ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 18) {
+                // Not lazy: a shelf holds 10–25 cards, built ahead of time by the feed.
+                // A lazy stack only creates the cards visible at layout time, which left
+                // empty space on the right while the page slid after hiding the sidebar.
+                HStack(alignment: .top, spacing: 18) {
                     ForEach(Array(shelf.items.enumerated()), id: \.element.id) { i, item in
                         CardView(item: item, width: item.kind == .video ? Prefs.shared.cardWidth * 1.66 : Prefs.shared.cardWidth).id(i)
                     }
                 }
                 .padding(.vertical, 4)
+                .environment(\.pageSlide, nil)
             }
             // Scroll edge-to-edge inside the panel; cards start aligned with the page text.
             .contentMargins(.horizontal, 28, for: .scrollContent)
@@ -470,14 +483,14 @@ struct ShelfView: View {
                 withAnimation(.timingCurve(0.25, 0.1, 0.25, 1, duration: 0.45)) { proxy.scrollTo(r, anchor: .leading) }
                 scrollRequest = nil
             }
-        }
+        } }
     }
 
     private var quickPicks: some View {
         let columns = stride(from: 0, to: shelf.items.count, by: 4).map { Array(shelf.items[$0..<min($0 + 4, shelf.items.count)]) }
-        return ScrollViewReader { proxy in
+        return OverhangLayout(width: overhang) { ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
                     ForEach(Array(columns.enumerated()), id: \.offset) { ci, col in
                         VStack(spacing: 2) {
                             ForEach(col) { item in
@@ -488,6 +501,7 @@ struct ShelfView: View {
                         .id(ci)
                     }
                 }
+                .environment(\.pageSlide, nil)
             }
             .contentMargins(.horizontal, 28, for: .scrollContent)
             .padding(.horizontal, -28)
@@ -496,7 +510,7 @@ struct ShelfView: View {
                 withAnimation(.timingCurve(0.25, 0.1, 0.25, 1, duration: 0.45)) { proxy.scrollTo(r, anchor: .leading) }
                 scrollRequest = nil
             }
-        }
+        } }
     }
 
     private var list: some View {
@@ -638,5 +652,40 @@ struct TextLinkStyle: ButtonStyle {
                 .animation(.easeOut(duration: 0.15), value: hover)
                 .onHover { hover = $0 }
         }
+    }
+}
+
+// MARK: - Carousel overhang
+
+private struct CarouselOverhangWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+extension EnvironmentValues {
+    /// While a page's width is animating (sidebar, window resize), carousels are laid
+    /// out once at this width and simply clipped by the window, instead of being
+    /// re-measured on every frame. nil: normal layout.
+    var carouselOverhangWidth: CGFloat? {
+        get { self[CarouselOverhangWidthKey.self] }
+        set { self[CarouselOverhangWidthKey.self] = newValue }
+    }
+}
+
+/// Takes the width it's offered, but lays its child out at `width` (when set),
+/// starting at its leading edge; the extra simply runs past the trailing edge.
+struct OverhangLayout: Layout {
+    var width: CGFloat?
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let childWidth = width ?? proposal.width
+        let size = child.sizeThatFits(ProposedViewSize(width: childWidth, height: proposal.height))
+        return CGSize(width: proposal.width ?? size.width, height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let child = subviews.first else { return }
+        child.place(at: bounds.origin, anchor: .topLeading,
+                    proposal: ProposedViewSize(width: width ?? bounds.width, height: bounds.height))
     }
 }

@@ -3,17 +3,10 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var player: PlayerController
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var sidebarState = SidebarState.shared
     @ObservedObject private var search = SearchController.shared
     @Environment(\.openWindow) private var openWindow
     @State private var sidebarWidth: CGFloat = Prefs.shared.sidebarWidth
-    /// Whether the page's layout leaves room for the sidebar. Closing: drops at once
-    /// (the leaving sidebar covers the left while the page glides). Opening: the page
-    /// keeps its full width while it glides right with the sidebar (its right side
-    /// just runs past the window edge, so no empty strip ever shows there), and takes
-    /// its narrower width when the glide ends, where the two line up exactly.
-    @State private var roomForSidebar: Bool?
-    @State private var roomGeneration = 0
-    private var pageRoom: Bool { roomForSidebar ?? model.sidebarVisible }
 
     static let panelGap: CGFloat = 10
     static let topBarHeight: CGFloat = 52
@@ -27,9 +20,7 @@ struct ContentView: View {
                 // floating glass top bar and player bar, so the glass shows them through it.
                 //
                 // Sidebar and queue are always mounted and slide in/out with a GPU-only
-                // offset (no re-creation, no per-frame layout). The page changes width
-                // once, then glides into place with the sidebar (PanelNudge), so the
-                // motion is smooth at the display's full frame rate.
+                // offset (no re-creation). The page re-lays out with the sidebar.
                 DetailPane()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // Content fades out softly as it scrolls up under the top bar (no band, no border).
@@ -41,31 +32,20 @@ struct ContentView: View {
                             Color.black
                         }
                     }
-                    // Opening: the page makes room at once and the panel slides into the
-                    // gap. Closing: the panel slides away first, then the page widens
-                    // (so a leaving panel never slides over the page).
-                    .padding(.leading, pageRoom ? sidebarWidth + Self.panelGap : 0)
+                    // The page takes its new width at once, then slides from its old spot
+                    // in step with the sidebar as one GPU transform (no per-frame layout,
+                    // which SwiftUI can't do at 120 fps for a page this rich). Controls on
+                    // the right edge counter-slide (`pinnedToTrailingEdge`), and carousels
+                    // run wide for the duration, so the right side never lags or shows a gap.
+                    .padding(.leading, model.sidebarVisible ? sidebarWidth + Self.panelGap : 0)
                     // The queue floats on top as its own rounded panel; the page stays full
                     // width underneath (only the panel's shape covers it).
                     .padding(.horizontal, Self.panelGap)
-                    .animation(nil, value: pageRoom)
-                    // A GPU-only transform glides the page in step with the sidebar, so
-                    // the whole window moves together (no per-frame layout).
+                    .animation(nil, value: model.sidebarVisible)
+                    .environment(\.pageSlide, PageSlide(shown: model.sidebarVisible, distance: sidebarWidth + Self.panelGap))
                     .modifier(PanelNudge(progress: model.sidebarVisible ? 1 : 0,
-                                         room: pageRoom,
+                                         shown: model.sidebarVisible,
                                          distance: sidebarWidth + Self.panelGap))
-                    .onChange(of: model.sidebarVisible) { _, shown in
-                        roomGeneration += 1
-                        roomForSidebar = false
-                        guard shown else { return }
-                        let gen = roomGeneration
-                        // Once the glide has settled, make room for real (no animation).
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                            guard gen == roomGeneration, model.sidebarVisible else { return }
-                            var t = Transaction(); t.disablesAnimations = true
-                            withTransaction(t) { roomForSidebar = true }
-                        }
-                    }
 
                 ResizableSidebar()
                     .padding(.top, Self.topBarHeight + 6)
@@ -736,22 +716,69 @@ struct SidebarWidthKey: PreferenceKey {
 }
 
 
+
+
 /// Slides the page from where it was to where it now is, as a GPU transform only
 /// (no layout), in step with the sidebar animation. `progress` animates 0↔1;
 /// `shown` is the new state, applied instantly.
 struct PanelNudge: GeometryEffect {
     var progress: CGFloat
-    /// Whether the page's layout already leaves room for the sidebar.
-    var room: Bool
+    var shown: Bool
+    var distance: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    static func offset(progress: CGFloat, shown: Bool, distance: CGFloat) -> CGFloat {
+        shown ? -distance * (1 - progress) : distance * progress
+    }
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: Self.offset(progress: progress, shown: shown, distance: distance), y: 0))
+    }
+}
+
+/// The page's sidebar slide, for views that must stay put against the window edge.
+struct PageSlide: Equatable {
+    var shown = true
+    var distance: CGFloat = 0
+}
+
+private struct PageSlideKey: EnvironmentKey { static let defaultValue: PageSlide? = nil }
+
+extension EnvironmentValues {
+    var pageSlide: PageSlide? {
+        get { self[PageSlideKey.self] }
+        set { self[PageSlideKey.self] = newValue }
+    }
+}
+
+/// Undoes the page slide (same animation, opposite direction), so a control laid out
+/// at the page's right edge stays at the window's right edge while the page slides.
+private struct CounterNudge: GeometryEffect {
+    var progress: CGFloat
+    var shown: Bool
     var distance: CGFloat
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }
     func effectValue(size: CGSize) -> ProjectionTransform {
-        // Visual left edge follows the sidebar (distance × progress); subtract
-        // the room the layout already leaves.
-        let x = distance * progress - (room ? distance : 0)
-        return ProjectionTransform(CGAffineTransform(translationX: x, y: 0))
+        ProjectionTransform(CGAffineTransform(translationX: -PanelNudge.offset(progress: progress, shown: shown, distance: distance), y: 0))
     }
+}
+
+private struct PinnedToTrailingEdge: ViewModifier {
+    @Environment(\.pageSlide) private var slide
+    func body(content: Content) -> some View {
+        if let slide {
+            content.modifier(CounterNudge(progress: slide.shown ? 1 : 0, shown: slide.shown, distance: slide.distance))
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Keeps a right-edge control fixed to the window edge while the sidebar slides.
+    func pinnedToTrailingEdge() -> some View { modifier(PinnedToTrailingEdge()) }
 }

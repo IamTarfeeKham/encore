@@ -27,7 +27,12 @@ final class AppModel: ObservableObject {
     @Published var path: [Route] = []
     @Published var forward: [Route] = []
     @Published var focusSearch = false
-    @Published var sidebarVisible = true
+    /// Lives in its own small object (SidebarState) so toggling it only refreshes the
+    /// few views that show it, not every view watching the app model.
+    var sidebarVisible: Bool {
+        get { SidebarState.shared.visible }
+        set { SidebarState.shared.visible = newValue }
+    }
     @Published var editingSidebar = false
     @Published var settingsSection: SettingsView.Section = .appearance
     @Published var showNowPlaying = false
@@ -138,5 +143,19 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
         flash("Link copied")
+    }
+}
+
+extension Notification.Name {
+    /// Posted just before the page's width starts animating (sidebar shown or hidden).
+    static let pageWidthWillAnimate = Notification.Name("pageWidthWillAnimate")
+}
+
+@MainActor
+final class SidebarState: ObservableObject {
+    static let shared = SidebarState()
+    @Published var visible = true {
+        // Lets wide pages (the feed) get ready before the width animation's first frame.
+        willSet { if newValue != visible { NotificationCenter.default.post(name: .pageWidthWillAnimate, object: nil) } }
     }
 }

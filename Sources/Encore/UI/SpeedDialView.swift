@@ -16,6 +16,7 @@ struct SpeedDialView: View {
                     Text("Speed Dial").font(.system(size: 22, weight: .bold))
                     Spacer()
                     Button("Edit") { editing = true }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .pinnedToTrailingEdge()
                 }
                 if tiles.isEmpty {
                     HStack(spacing: 14) {

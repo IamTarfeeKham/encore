@@ -38,9 +38,7 @@ struct FeedView: View {
                         if model.built.contains(row.id) {
                             row.content()
                                 .fixedSize(horizontal: false, vertical: true)
-                                .background(GeometryReader { g in
-                                    Color.clear.preference(key: FeedHeightsKey.self, value: [row.id: g.size.height])
-                                })
+                                .modifier(FeedHeightReporter(id: row.id, model: model))
                         } else {
                             Color.clear.frame(height: model.heights[row.id] ?? row.estimate)
                         }
@@ -49,6 +47,9 @@ struct FeedView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // While the width is animating, carousels keep one wide layout (clipped by
+            // the window) instead of re-measuring every frame.
+            .environment(\.carouselOverhangWidth, model.frozen ? model.overhangWidth : nil)
             .onPreferenceChange(FeedHeightsKey.self) { model.measured($0) }
             .background(FeedScrollObserver(model: model))
         }
@@ -81,6 +82,56 @@ final class FeedModel: ObservableObject {
     private(set) var heights: [String: CGFloat] = [:]
     var onNearEnd: () -> Void = {}
     var onPull: (CGFloat) -> Void = { _ in }
+
+    /// True while the page width is changing; see FeedView.
+    @Published private(set) var frozen = false
+    /// Width carousels are laid out at while frozen: wide enough for any page width.
+    private(set) var overhangWidth: CGFloat = 0
+    private var width: CGFloat = 0
+    private var screenWidth: CGFloat = 0
+    private var freezeGeneration = 0
+    private var liveResizing = false
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: .pageWidthWillAnimate, object: nil, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.freeze(for: 0.75) }
+        })
+        observers.append(nc.addObserver(forName: NSWindow.willStartLiveResizeNotification, object: nil, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.liveResizing = true; self?.freeze(for: nil) }
+        })
+        observers.append(nc.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: nil, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.liveResizing = false; self?.freeze(for: 0.05) }
+        })
+    }
+
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+    /// Keeps out-of-sight rows at the current width until `seconds` after the last
+    /// call (nil: until told otherwise), then lets everything take the new width once.
+    private func freeze(for seconds: Double?) {
+        guard width > 0 else { return }
+        if !frozen {
+            overhangWidth = max(screenWidth, width) + 60
+            // Rows out of sight are swapped for exact-height space for the duration
+            // (rebuilt one at a time afterwards), so fewer views move with the page.
+            let near = Set(range(from: top - viewport * 0.2, to: top + viewport * 1.2).map { rows[$0].id })
+            let release = built.filter { !near.contains($0) && heights[$0] != nil }
+            if !release.isEmpty { built.subtract(release) }
+            frozen = true
+        }
+        freezeGeneration += 1
+        guard let seconds else { return }
+        let gen = freezeGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, gen == self.freezeGeneration, !self.liveResizing else { return }
+            self.frozen = false
+            self.scheduleIdle()
+        }
+    }
+
+    func widthChanged(_ w: CGFloat, screen: CGFloat) { width = w; screenWidth = screen }
 
     private var rows: [Meta] = []
     private var offsets: [CGFloat] = []
@@ -159,7 +210,7 @@ final class FeedModel: ObservableObject {
     /// one behind. Then release rows that are far away.
     private func idleStep() {
         guard !rows.isEmpty else { return }
-        if ScrollActivity.isScrolling { scheduleIdle(); return }
+        if ScrollActivity.isScrolling || frozen { if !frozen { scheduleIdle() }; return }
         let ahead = range(from: top - viewport, to: top + viewport * 5)
         if let last = rows.indices.last, ahead.contains(last), nearEndFiredForCount != rows.count {
             nearEndFiredForCount = rows.count
@@ -209,9 +260,31 @@ private struct FeedScrollObserver: NSViewRepresentable {
             guard let doc = sv.documentView else { return }
             let r = sv.documentVisibleRect
             let top = (doc.isFlipped ? r.minY : doc.bounds.height - r.maxY) + sv.contentInsets.top
-            MainActor.assumeIsolated { model.scrolled(top: top, viewport: r.height) }
+            MainActor.assumeIsolated {
+                model.widthChanged(r.width, screen: sv.window?.screen?.frame.width ?? r.width)
+                model.scrolled(top: top, viewport: r.height)
+            }
         }
 
         deinit { if let t = token { NotificationCenter.default.removeObserver(t) } }
+    }
+}
+
+/// Reports a row's height to the model. On macOS 15+ this only fires when the
+/// height actually changes (not on every layout pass, e.g. each frame of a width
+/// animation); older systems fall back to a preference.
+private struct FeedHeightReporter: ViewModifier {
+    let id: String
+    let model: FeedModel
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                model.measured([id: h])
+            }
+        } else {
+            content.background(GeometryReader { g in
+                Color.clear.preference(key: FeedHeightsKey.self, value: [id: g.size.height])
+            })
+        }
     }
 }
