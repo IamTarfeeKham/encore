@@ -170,13 +170,14 @@ struct TransportControls: View {
             if spread { Spacer(minLength: 6) }
             Button { player.togglePlayPause() } label: {
                 ZStack {
-                    if player.isBuffering && player.isPlaying {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        // Glyphs are optically centred: the play triangle's visual centre sits right of its box.
-                        PlayPauseGlyph(playing: player.isPlaying, size: playSize)
-                    }
+                    // The glyph stays in place (never rebuilt), so its play ⇄ pause
+                    // morph is never cut short; the spinner just fades over it.
+                    let spinning = player.isBuffering && player.isPlaying
+                    PlayPauseGlyph(playing: player.isPlaying, size: playSize)
+                        .opacity(spinning ? 0 : 1)
+                    if spinning { ProgressView().controlSize(.small).transition(.opacity) }
                 }
+                .animation(.easeOut(duration: 0.15), value: player.isBuffering)
                 .frame(width: playSize, height: playSize)
             }
             .buttonStyle(PlayButtonStyle(size: playSize))

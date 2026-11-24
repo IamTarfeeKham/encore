@@ -148,14 +148,19 @@ final class PlayerController: ObservableObject {
             if s.duration > 0, abs(clock.duration - s.duration) > 0.5 { clock.duration = s.duration }
             clock.sync(time: s.time, playing: playing, rate: s.rate, at: s.measuredAt)
         }
-        if playing != isPlaying && (fresh || !playing) { isPlaying = playing; now.isPlaying = playing }
+        // Right after you press play or pause, the page can still report the old state
+        // for a moment; trust your press until it catches up (so the button doesn't
+        // flip back and forth). A finished track (state 0) always wins.
+        let settling = Date() < expectStateUntil && s.state != 0
+        if settling && playing == isPlaying { expectStateUntil = .distantPast }
+        if !settling, playing != isPlaying && (fresh || !playing) { isPlaying = playing; now.isPlaying = playing }
         // SponsorBlock: jump over non-music / sponsor segments.
         if fresh, playing, let seg = SponsorBlock.shared.check(time: s.time, videoId: s.videoId) {
             seek(to: seg.end)
             AppModel.shared.flash(SponsorBlock.label(seg.category))
         }
         let buffering = s.state == 3 || (Date().timeIntervalSince(lastLoadAt) < 8 && !fresh)
-        if buffering != isBuffering { isBuffering = buffering }
+        setBuffering(buffering)
         if playing, sleepAtEndOfTrack == false, let at = sleepAt, Date() >= at { fireSleep() }
     }
 
@@ -301,6 +306,25 @@ final class PlayerController: ObservableObject {
 
     func togglePlayPause() { isPlaying ? pause() : resume() }
 
+    /// Until when a just-pressed play/pause is trusted over the page's reports.
+    private var expectStateUntil = Date.distantPast
+    private var bufferingRaw = false
+
+    /// The spinner only appears if buffering lasts a moment; a blip on resume
+    /// doesn't swap the play button's icon out and back.
+    private func setBuffering(_ b: Bool) {
+        guard b != bufferingRaw else { return }
+        bufferingRaw = b
+        if b {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self, self.bufferingRaw, !self.isBuffering else { return }
+                self.isBuffering = true
+            }
+        } else if isBuffering {
+            isBuffering = false
+        }
+    }
+
     func resume() {
         guard current != nil else { return }
         if needsLoad || bridge.snapshot.videoId != current?.videoId && bridge.snapshot.videoId != current?.counterpartVideoId {
@@ -310,10 +334,12 @@ final class PlayerController: ObservableObject {
         }
         isPlaying = true
         now.isPlaying = true
+        expectStateUntil = Date().addingTimeInterval(2)
     }
 
     func pause() {
         bridge.pause(); isPlaying = false; now.isPlaying = false
+        expectStateUntil = Date().addingTimeInterval(1.5)
         clock.sync(time: clock.now(), playing: false, rate: 1)
         save()
     }
@@ -471,7 +497,7 @@ final class PlayerController: ObservableObject {
         clock.sync(time: start, playing: false, rate: 1)
         now.videoId = t.videoId
         PlayStats.shared.record(t)
-        isBuffering = true
+        isBuffering = true; bufferingRaw = true
         likeStatus = .indifferent
         lyricsBrowseId = nil
         lastError = nil
