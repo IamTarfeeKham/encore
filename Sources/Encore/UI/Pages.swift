@@ -23,6 +23,11 @@ extension View {
     }
 }
 
+private struct PullOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 // MARK: - Shelf pages (Home / Explore / Charts / Moods / generic browse)
 
 struct ShelvesPage: View {
@@ -38,38 +43,36 @@ struct ShelvesPage: View {
     @State private var chip: Chip?
     @State private var error: String?
     @State private var reload = 0
+    /// Pull-to-refresh: how far past the top the page is pulled, in steps of 0…10
+    /// (stepped so scrolling doesn't redraw the page every frame).
+    @State private var pullStep = 0
+    @State private var refreshing = false
     @ObservedObject private var prefs = Prefs.shared
+    private static let pullDistance: CGFloat = 70
 
     var body: some View {
-        Group {
-            if let page {
-                // A native recycling list (like YouTube's feed): only about a screenful of
-                // row views exist; as a section scrolls off one edge its row view is
-                // reused for the one coming in at the other edge. Cost stays flat however
-                // long the endless feed gets. Spacing lives inside rows (a row's large
-                // insets were mirrored below it by the list).
-                List {
-                    Text(title).font(.system(size: 30, weight: .bold))
-                        .padding(.top, PageInsets.top).padding(.bottom, 20)
-                        .listChrome()
-                    if let header { header.padding(.bottom, 34).listChrome() }
-                    if showChips, Prefs.shared.showHomeChips, !page.chips.isEmpty {
-                        // One full-width row when they fit; otherwise a single swipeable row
-                        // with arrows (never a second row).
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 8) { chipButtons(page.chips) }
-                            ChipScroller(chips: page.chips, selected: chip?.title) { c in
-                                chip = chip?.title == c.title ? nil : c
-                            }
+        ScrollView {
+            // Lazy: only the sections on screen are built and laid out. The feed is
+            // open-ended, so an eager stack would build every loaded section, and its
+            // "load more" marker would fire at once (an eager stack creates every
+            // child immediately), pulling the whole feed in at launch.
+            LazyVStack(alignment: .leading, spacing: 34) {
+                Text(title).font(.system(size: 30, weight: .bold)).padding(.bottom, -14)
+                if let header { header }
+                if showChips, Prefs.shared.showHomeChips, let chips = page?.chips, !chips.isEmpty {
+                    // One full-width row when they fit; otherwise a single swipeable row
+                    // with arrows (never a second row).
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { chipButtons(chips) }
+                        ChipScroller(chips: chips, selected: chip?.title) { c in
+                            chip = chip?.title == c.title ? nil : c
                         }
-                        .padding(.bottom, 34)
-                        .listChrome()
                     }
+                }
+                if let page {
                     let hidden = id == "home" ? Set(Prefs.shared.hiddenHomeSections) : []
                     ForEach((page.shelves + extra).filter { !hidden.contains($0.title) }) { s in
                         ShelfView(shelf: s, hideable: id == "home")
-                            .padding(.bottom, 34)
-                            .listChrome()
                     }
                     // Keeps going like YouTube: YouTube's own pages first, then an
                     // endless "Because you listened to…" feed (see loadMore).
@@ -77,7 +80,6 @@ struct ShelvesPage: View {
                         ProgressView().frame(maxWidth: .infinity).padding()
                             .onAppear { loadMore() }
                             .id("more-\(extra.count)")
-                            .listChrome()
                     }
                     if id == "home", !prefs.hiddenHomeSections.isEmpty {
                         HStack(spacing: 12) {
@@ -95,20 +97,31 @@ struct ShelvesPage: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .listChrome()
                     }
-                    Color.clear.frame(height: PageInsets.bottom).listChrome()
+                } else if let error {
+                    ErrorView(message: error) { self.error = nil; reload += 1 }
+                } else {
+                    LoadingView()
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .environment(\.defaultMinListRowHeight, 1)
-            } else if let error {
-                ErrorView(message: error) { self.error = nil; reload += 1 }
-            } else {
-                LoadingView()
+            }
+            .pagePadding()
+            .background(GeometryReader { g in
+                Color.clear.preference(key: PullOffsetKey.self,
+                                       value: g.frame(in: .named("shelvesScroll")).minY)
+            })
+        }
+        .coordinateSpace(name: "shelvesScroll")
+        .onPreferenceChange(PullOffsetKey.self) { y in
+            let step = Int(min(max(y / Self.pullDistance, 0), 1) * 10)
+            if step != pullStep { pullStep = step }
+            if step >= 10, !refreshing, page != nil {
+                refreshing = true
+                reload += 1
             }
         }
+        .overlay(alignment: .top) { pullIndicator }
         .task(id: "\(id)|\(chip?.title ?? "")|\(reload)") {
+            defer { if refreshing { withAnimation(.easeOut(duration: 0.25)) { refreshing = false } } }
             do {
                 let p = try await loader(chip)
                 var merged = p
@@ -118,7 +131,30 @@ struct ShelvesPage: View {
             } catch is CancellationError {
             } catch { if page == nil { self.error = error.localizedDescription } }
         }
-        .refreshable { reload += 1 }
+    }
+
+    /// Spinner at the top centre: fills in as you pull down past the top, then
+    /// spins while the page reloads.
+    @ViewBuilder private var pullIndicator: some View {
+        let shown = refreshing || pullStep > 0
+        ZStack {
+            if refreshing {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .semibold))
+                    .rotationEffect(.degrees(Double(pullStep) * 27))
+                    .opacity(Double(pullStep) / 10)
+            }
+        }
+        .frame(width: 34, height: 34)
+        .background(.regularMaterial, in: Circle())
+        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        .scaleEffect(shown ? 1 : 0.6)
+        .opacity(shown ? 1 : 0)
+        .padding(.top, ContentView.topBarHeight + 8)
+        .animation(.easeOut(duration: 0.15), value: shown)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder private func chipButtons(_ chips: [Chip]) -> some View {
