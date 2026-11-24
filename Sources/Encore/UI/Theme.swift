@@ -238,28 +238,57 @@ final class AmbientLayerView: NSView {
     }
 
     private func makeGroup(_ img: CGImage) -> CALayer {
+        let (square, faded) = Self.bake(img)
         let g = CALayer()
         g.frame = bounds
         for (i, spec) in specs.enumerated() {
             let wrapper = CALayer()          // moves with the pointer
             let art = CALayer()              // spins forever
-            art.contents = img
+            // The soft radial fade of the upper layers is baked into the bitmap once,
+            // instead of a live gradient mask that cost an extra off-screen pass on
+            // every frame of the animation. Same pixels.
+            art.contents = i > 0 ? (faded ?? img) : (square ?? img)
             art.contentsGravity = .resizeAspectFill
             art.opacity = dark ? spec.5 : spec.5 * 0.7
-            if i > 0 {
-                let m = CAGradientLayer()
-                m.type = .radial
-                m.colors = [NSColor.black.cgColor, NSColor.black.withAlphaComponent(0.6).cgColor, NSColor.clear.cgColor]
-                m.startPoint = CGPoint(x: 0.5, y: 0.5); m.endPoint = CGPoint(x: 1, y: 1)
-                art.mask = m
-                if dark { art.compositingFilter = "plusL" }
-            }
+            if i > 0, dark { art.compositingFilter = "plusL" }
             addSpin(to: art, spec: spec)
             wrapper.addSublayer(art)
             g.addSublayer(wrapper)
         }
         layoutGroup(g, animated: false)
         return g
+    }
+
+    /// The artwork centre-cropped to a square (what aspect-fill shows on the square
+    /// layers), and the same square with the radial fade the mask used to apply:
+    /// opaque centre → 60% halfway → clear at the edge.
+    private static func bake(_ img: CGImage) -> (CGImage?, CGImage?) {
+        let side = 256
+        let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+        func ctx() -> CGContext? {
+            CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        }
+        let w = CGFloat(img.width), h = CGFloat(img.height), s = CGFloat(side)
+        let scale = max(s / w, s / h)
+        let drawRect = CGRect(x: (s - w * scale) / 2, y: (s - h * scale) / 2, width: w * scale, height: h * scale)
+        guard let sq = ctx() else { return (nil, nil) }
+        sq.interpolationQuality = .high
+        sq.draw(img, in: drawRect)
+        let square = sq.makeImage()
+        guard let mctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                   space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue),
+              let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceGray(),
+                                    colors: [CGColor(gray: 1, alpha: 1), CGColor(gray: 0.6, alpha: 1), CGColor(gray: 0, alpha: 1)] as CFArray,
+                                    locations: [0, 0.5, 1]),
+              let fc = ctx(), let square else { return (square, nil) }
+        mctx.setFillColor(gray: 0, alpha: 1); mctx.fill(CGRect(x: 0, y: 0, width: s, height: s))
+        let c = CGPoint(x: s / 2, y: s / 2)
+        mctx.drawRadialGradient(grad, startCenter: c, startRadius: 0, endCenter: c, endRadius: s / 2, options: [])
+        guard let mask = mctx.makeImage() else { return (square, nil) }
+        fc.clip(to: CGRect(x: 0, y: 0, width: s, height: s), mask: mask)
+        fc.draw(square, in: CGRect(x: 0, y: 0, width: s, height: s))
+        return (square, fc.makeImage())
     }
 
     private func addSpin(to art: CALayer, spec: (CGFloat, CGFloat, CGFloat, CGFloat, Double, Float)) {
@@ -302,7 +331,6 @@ final class AmbientLayerView: NSView {
                 wrapper.bounds = CGRect(x: 0, y: 0, width: size, height: size)
                 if let art = wrapper.sublayers?.first {
                     art.frame = wrapper.bounds
-                    art.mask?.frame = art.bounds
                 }
             }
             wrapper.position = center

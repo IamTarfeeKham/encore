@@ -116,7 +116,13 @@ struct CardView: View {
         .contentShape(Rectangle())
         .onHover { h in
             // Ignore hover changes caused by content scrolling under a still pointer.
-            if h && ScrollActivity.isScrolling { return }
+            // When it leaves while scrolling, drop it instantly (no spring animations
+            // started mid-scroll); a real pointer move animates as before.
+            if ScrollActivity.isScrolling {
+                if h { return }
+                if hover { hover = false }
+                return
+            }
             withAnimation(.spring(duration: 0.25, bounce: 0.2)) { hover = h }
         }
         .onTapGesture { model.open(item) }

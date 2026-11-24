@@ -124,25 +124,25 @@ struct Artwork: View {
         return 1200
     }
 
+    @State private var fade = false
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shown = image ?? url.flatMap({ ImageLoader.shared.cached($0, maxPixel: maxPixel) })
         Color.clear
             .aspectRatio(aspect, contentMode: .fit)
-            .background(.quaternary.opacity(0.6))
+            .background(shape.fill(.quaternary.opacity(0.6)))
             .overlay {
-                if let image = image ?? url.flatMap({ ImageLoader.shared.cached($0, maxPixel: maxPixel) }) {
-                    Image(decorative: image, scale: 1)
-                        .resizable()
-                        .interpolation(.high)
-                        .aspectRatio(contentMode: .fill)
-                } else {
+                if shown == nil {
                     Image(systemName: symbol)
                         .font(.system(size: max(10, size * 0.18), weight: .light))
                         .foregroundStyle(.tertiary)
                 }
             }
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
+            // The picture itself is one Core Animation layer (rounded, clipped and
+            // bordered by the layer, faded in by Core Animation): no SwiftUI image
+            // resampling, clip mask or animation transaction per card.
+            .overlay { ArtworkLayer(image: shown, cornerRadius: cornerRadius, fade: fade) }
             .task(id: url.map { ImageLoader.key($0, maxPixel) }) {
                 guard let url else { image = nil; return }
                 let key = ImageLoader.key(url, maxPixel)
@@ -155,8 +155,61 @@ struct Artwork: View {
                 if img == nil, hq != url { img = await ImageLoader.shared.cgImage(for: url, maxPixel: maxPixel) }
                 if let img { ImageLoader.sharedCache.setObject(CGImageBox(img), forKey: key as NSString, cost: img.bytesPerRow * img.height) }
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.18)) { image = img }
+                fade = true
+                image = img
                 loadedKey = key
             }
+    }
+}
+
+/// A single CALayer showing artwork: aspect-fill, rounded (continuous corners),
+/// hairline border, high-quality filtering, and a Core Animation cross-fade when
+/// a freshly downloaded image arrives.
+private struct ArtworkLayer: NSViewRepresentable {
+    let image: CGImage?
+    let cornerRadius: CGFloat
+    let fade: Bool
+
+    func makeNSView(context: Context) -> LayerView { LayerView() }
+    func updateNSView(_ v: LayerView, context: Context) { v.update(image: image, radius: cornerRadius, fade: fade) }
+
+    final class LayerView: NSView {
+        private var current: CGImage?
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layerContentsRedrawPolicy = .never
+            guard let l = layer else { return }
+            l.contentsGravity = .resizeAspectFill
+            l.masksToBounds = true
+            l.cornerCurve = .continuous
+            l.minificationFilter = .trilinear
+            l.magnificationFilter = .linear
+            l.borderWidth = 0.5
+            l.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        }
+        required init?(coder: NSCoder) { fatalError() }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override var wantsUpdateLayer: Bool { true }
+
+        func update(image: CGImage?, radius: CGFloat, fade: Bool) {
+            guard let l = layer else { return }
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            if l.cornerRadius != radius { l.cornerRadius = radius }
+            CATransaction.commit()
+            guard image !== current else { return }
+            let animate = fade && current == nil && image != nil && window != nil
+            current = image
+            if animate {
+                let t = CATransition()
+                t.type = .fade
+                t.duration = 0.18
+                t.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                l.add(t, forKey: "fadeIn")
+            }
+            CATransaction.begin(); CATransaction.setDisableActions(!animate)
+            l.contents = image
+            CATransaction.commit()
+        }
     }
 }

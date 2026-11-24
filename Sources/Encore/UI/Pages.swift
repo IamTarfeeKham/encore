@@ -23,9 +23,40 @@ extension View {
     }
 }
 
-private struct PullOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+/// Reports how far the enclosing scroll view is pulled down past its top, straight
+/// from AppKit's clip view — no SwiftUI work per scrolled frame.
+private struct ScrollOffsetObserver: NSViewRepresentable {
+    let onChange: (CGFloat) -> Void
+    func makeNSView(context: Context) -> ObserverView { let v = ObserverView(); v.onChange = onChange; return v }
+    func updateNSView(_ v: ObserverView, context: Context) { v.onChange = onChange }
+
+    final class ObserverView: NSView {
+        var onChange: ((CGFloat) -> Void)?
+        private var token: NSObjectProtocol?
+        private var last: CGFloat = 0
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let t = token { NotificationCenter.default.removeObserver(t); token = nil }
+            guard window != nil, let sv = enclosingScrollView else { return }
+            sv.contentView.postsBoundsChangedNotifications = true
+            token = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
+                                                           object: sv.contentView, queue: .main) { [weak self, weak sv] _ in
+                guard let sv, let doc = sv.documentView else { return }
+                let r = sv.documentVisibleRect
+                let top = (doc.isFlipped ? r.minY : doc.bounds.height - r.maxY) + sv.contentInsets.top
+                let pulled = max(0, -top)
+                MainActor.assumeIsolated {
+                    guard let self, pulled != self.last, pulled < 400 else { return }
+                    // Only matters near the top; skip the callback while far down the page.
+                    if pulled == 0 && self.last == 0 { return }
+                    self.last = pulled
+                    self.onChange?(pulled)
+                }
+            }
+        }
+        deinit { if let t = token { NotificationCenter.default.removeObserver(t) } }
+    }
 }
 
 // MARK: - Shelf pages (Home / Explore / Charts / Moods / generic browse)
@@ -50,9 +81,35 @@ struct ShelvesPage: View {
     @ObservedObject private var prefs = Prefs.shared
     private static let pullDistance: CGFloat = 70
 
+    /// How far below the window the page is prepared. The scroll view is made this
+    /// much taller than the window (the extra part is clipped away), so the lazy
+    /// stack builds each section — header, carousel, cards, image requests — while
+    /// it's still out of sight, instead of in the middle of a scroll frame.
+    private static let lookahead: CGFloat = 900
+
     var body: some View {
+        GeometryReader { geo in
+            scroller
+                .frame(width: geo.size.width, height: geo.size.height + Self.lookahead, alignment: .top)
+        }
+        .clipped()
+        .overlay(alignment: .top) { pullIndicator }
+        .task(id: "\(id)|\(chip?.title ?? "")|\(reload)") {
+            defer { if refreshing { withAnimation(.easeOut(duration: 0.25)) { refreshing = false } } }
+            do {
+                let p = try await loader(chip)
+                var merged = p
+                if chip != nil, let old = page { merged.chips = old.chips }
+                page = merged; extra = []; continuation = p.continuation; error = nil
+                usedSeeds = []; discoveryExhausted = false
+            } catch is CancellationError {
+            } catch { if page == nil { self.error = error.localizedDescription } }
+        }
+    }
+
+    private var scroller: some View {
         ScrollView {
-            // Lazy: only the sections on screen are built and laid out. The feed is
+            // Lazy: only the sections on screen (plus the lookahead) are built and laid out. The feed is
             // open-ended, so an eager stack would build every loaded section, and its
             // "load more" marker would fire at once (an eager stack creates every
             // child immediately), pulling the whole feed in at launch.
@@ -105,31 +162,18 @@ struct ShelvesPage: View {
                 }
             }
             .pagePadding()
-            .background(GeometryReader { g in
-                Color.clear.preference(key: PullOffsetKey.self,
-                                       value: g.frame(in: .named("shelvesScroll")).minY)
-            })
+            .padding(.bottom, Self.lookahead)
+            .background(ScrollOffsetObserver { pulled in updatePull(pulled) })
         }
-        .coordinateSpace(name: "shelvesScroll")
-        .onPreferenceChange(PullOffsetKey.self) { y in
-            let step = Int(min(max(y / Self.pullDistance, 0), 1) * 10)
-            if step != pullStep { pullStep = step }
-            if step >= 10, !refreshing, page != nil {
-                refreshing = true
-                reload += 1
-            }
-        }
-        .overlay(alignment: .top) { pullIndicator }
-        .task(id: "\(id)|\(chip?.title ?? "")|\(reload)") {
-            defer { if refreshing { withAnimation(.easeOut(duration: 0.25)) { refreshing = false } } }
-            do {
-                let p = try await loader(chip)
-                var merged = p
-                if chip != nil, let old = page { merged.chips = old.chips }
-                page = merged; extra = []; continuation = p.continuation; error = nil
-                usedSeeds = []; discoveryExhausted = false
-            } catch is CancellationError {
-            } catch { if page == nil { self.error = error.localizedDescription } }
+        .contentMargins(.bottom, Self.lookahead, for: .scrollIndicators)
+    }
+
+    private func updatePull(_ pulled: CGFloat) {
+        let step = Int(min(max(pulled / Self.pullDistance, 0), 1) * 10)
+        if step != pullStep { pullStep = step }
+        if step >= 10, !refreshing, page != nil {
+            refreshing = true
+            reload += 1
         }
     }
 
