@@ -34,6 +34,8 @@ struct ShelvesPage: View {
     @State private var page: BrowsePage?
     @State private var extra: [Shelf] = []
     @State private var continuation: String?
+    /// Failed attempts to load the next page; a network blip shouldn't end the list early.
+    @State private var continuationFailures = 0
     @State private var loadingMore = false
     @State private var chip: Chip?
     @State private var error: String?
@@ -50,6 +52,7 @@ struct ShelvesPage: View {
             if let page {
                 FeedView(rows: rows(for: page),
                          resetKey: "\(id)|\(page.shelves.first?.id.uuidString ?? "")",
+                         canLoadMore: continuation != nil || canDiscover,
                          onNearEnd: { loadMore() },
                          onPull: { updatePull($0) })
             } else {
@@ -75,7 +78,7 @@ struct ShelvesPage: View {
                 var merged = p
                 if chip != nil, let old = page { merged.chips = old.chips }
                 page = merged; extra = []; continuation = p.continuation; error = nil
-                usedSeeds = []; discoveryExhausted = false
+                usedSeeds = []; discoveryExhausted = false; continuationFailures = 0
             } catch is CancellationError {
             } catch { if page == nil { self.error = error.localizedDescription } }
         }
@@ -213,9 +216,15 @@ struct ShelvesPage: View {
             Task {
                 defer { loadingMore = false }
                 if let more = try? await InnerTube.shared.continuation(token) {
+                    continuationFailures = 0
                     extra += more.shelves
                     continuation = more.continuation
-                } else { continuation = nil }
+                } else {
+                    // Retry YouTube's own feed a few times before moving on to the
+                    // "Because you listened to…" sections (the feed asks again shortly).
+                    continuationFailures += 1
+                    if continuationFailures >= 3 { continuation = nil }
+                }
             }
         } else if canDiscover {
             loadingMore = true
@@ -313,6 +322,8 @@ struct CollectionView: View {
     @State private var page: CollectionPage?
     @State private var tracks: [MediaItem] = []
     @State private var continuation: String?
+    /// Failed attempts to load the next page; a network blip shouldn't end the list early.
+    @State private var loadFailures = 0
     @State private var error: String?
     @State private var reload = 0
     @State private var filter = ""
@@ -520,9 +531,16 @@ struct CollectionView: View {
         continuation = nil
         Task {
             if let (more, next) = try? await InnerTube.shared.collectionContinuation(token) {
+                loadFailures = 0
                 tracks += more.filter { $0.videoId != nil }
                 if browseId == "VLLM" { LikeStore.shared.seedLiked(more.compactMap(\.videoId)) }
                 continuation = more.isEmpty ? nil : next
+            } else if loadFailures < 3 {
+                // Try again shortly (the spinner reappears and asks again), so one
+                // failed request doesn't silently cut a long playlist short.
+                loadFailures += 1
+                try? await Task.sleep(nanoseconds: UInt64(loadFailures) * 2_000_000_000)
+                continuation = token
             }
         }
     }
@@ -640,6 +658,8 @@ struct LibraryView: View {
                     if items.isEmpty {
                         ContentUnavailableView("Nothing Here Yet", systemImage: section.symbol,
                                                description: Text("Items you add to your YouTube Music library appear here."))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 60)
                     } else if section == .history {
                         ForEach(page.shelves) { shelf in
                             Text(shelf.title).font(.system(size: 17, weight: .semibold)).padding(.top, 8)
@@ -656,11 +676,12 @@ struct LibraryView: View {
                     } else if section == .artists || section == .subscriptions {
                         LazyVStack(spacing: 0) { ForEach(items) { CollectionRow(item: $0) } }
                     } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 176, maximum: 176), spacing: 20, alignment: .top)], spacing: 26) {
-                            ForEach(items) { CardView(item: $0, width: 170) }
-                        }
+                        CardGrid(items: items)
                     }
                 }
+                // Full width, so the title stays on the left (like every other page)
+                // even when the page is empty.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .pagePadding()
             }
         }
@@ -688,6 +709,8 @@ struct SearchView: View {
     @State private var results: SearchResults?
     @State private var items: [MediaItem] = []
     @State private var continuation: String?
+    /// Failed attempts to load the next page; a network blip shouldn't end the list early.
+    @State private var loadFailures = 0
     @State private var error: String?
 
     enum Filter: String, CaseIterable, Identifiable {
@@ -751,9 +774,7 @@ struct SearchView: View {
         if items.isEmpty {
             ContentUnavailableView.search(text: query)
         } else if isGrid {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 176, maximum: 176), spacing: 20, alignment: .top)], spacing: 26) {
-                ForEach(items) { CardView(item: $0, width: 170) }
-            }
+            CardGrid(items: items)
         } else {
             LazyVStack(spacing: 0) {
                 ForEach(items) { item in
@@ -773,9 +794,14 @@ struct SearchView: View {
         continuation = nil
         Task {
             if let (more, next) = try? await InnerTube.shared.searchContinuation(token) {
+                loadFailures = 0
                 let known = Set(items.map(\.id))
                 items += more.filter { !known.contains($0.id) }
                 continuation = more.isEmpty ? nil : next
+            } else if loadFailures < 3 {
+                loadFailures += 1
+                try? await Task.sleep(nanoseconds: UInt64(loadFailures) * 2_000_000_000)
+                continuation = token
             }
         }
     }

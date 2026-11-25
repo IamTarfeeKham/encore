@@ -16,12 +16,14 @@ A hidden `WKWebView` loads music.youtube.com with your session. An injected scri
 - player state
 - load, play, pause, seek, volume and playback rate
 - HD selection and volume fades
-- the Web Audio equaliser
+- song endings: a song is ended (or, on repeat one, restarted) 0.35 s before the media element finishes, so YouTube's own autoplay never starts a different song first. Endings during ads are ignored.
 - a canvas video mode, used for Song/Video switching
+
+There is no equaliser: WebKit hands Web Audio pure silence for YouTube's (Media Source) audio, so routing it through Web Audio filters would only mute it.
 
 The view is kept alive in an off-screen parking window, or mounted in the main window for video.
 
-`PlayerController` owns the queue: radio/autoplay, shuffle, repeat, sleep timer, a persisted queue and counterpart video switching. It also runs the SponsorBlock check and records play stats. `PlaybackClock` extrapolates playback time between polls, which keeps lyrics smooth.
+`PlayerController` owns the queue: radio/autoplay, shuffle, repeat, sleep timer, a persisted queue and counterpart video switching. It also runs crossfade: a fade-out over the end of a song and a fade-in for the next (one player, so they don't overlap), with Smart rules (same album plays straight through, at most a tenth of the song, short fade-ins). It also runs the SponsorBlock check and records play stats. `PlaybackClock` extrapolates playback time between polls, which keeps lyrics smooth.
 
 ## Data (`Core/InnerTube.swift`, `Core/Parser.swift`, `Core/JSON.swift`)
 
@@ -55,11 +57,13 @@ Timing defaults follow Better Lyrics:
 | `ContentView.swift` | Window layout: animated background, resizable sidebar, detail pane, queue, floating top bar and player bar, search panel, Now Playing overlay |
 | `Theme.swift` | Glass panels (Liquid Glass on macOS 26, frosted or solid otherwise), button styles, the ambient artwork background, window chrome (traffic-light placement) |
 | `Pages.swift` | Home, Explore and browse shelves; collection (album/playlist) pages built on a native `List` for fast scrolling; artist, library and search pages |
-| `Components.swift` | Cards, shelf carousels, track rows |
-| `PlayerBar.swift` | Player bar, transport, scrubber, volume |
+| `Feed.swift` | The endless Home/Explore feed: a SwiftUI scroll view whose rows are prepared ahead while you're not scrolling, released far from view (keeping their exact height), and paused during width animations |
+| `Components.swift` | Cards (fixed size, so carousels never measure them), shelf carousels, track rows, left-packed grids |
+| `PlayerBar.swift` | Player bar, transport, scrubber, volume, crossfade |
 | `NowPlayingView.swift` | Now Playing, the lyrics pane, video host |
 | `QueueAndMini.swift` | Queue inspector, mini player, menu bar player |
 | `SignInAndSettings.swift` | Sign-in web view and all settings pages |
+| `About.swift` | The About window |
 
 ## Preferences and stores
 
@@ -71,7 +75,8 @@ Timing defaults follow Better Lyrics:
 
 ## Debugging
 
-- **Frame-pacing log:** run `defaults write local.ytmusicmac perfLog -bool YES`. The log is written to `~/Library/Containers/local.ytmusicmac/Data/tmp/perf.log`.
+- **Frame-pacing log:** run `defaults write local.ytmusicmac perfLog -bool YES` (add `perfLogAll` to count every frame, not just scrolling). The log is written to `~/Library/Containers/local.ytmusicmac/Data/tmp/perf.log`, along with crossfade decisions.
+- **Sidebar animation benchmark:** with `perfLog` on, posting the distributed notification `local.ytmusicmac.perf.toggleSidebar` toggles the sidebar and logs the frames of that animation.
 - **Launch at an exact window size:** `open build/Encore.app --args -debugWindowSize 1400x900`
 
 ## Porting to Windows and Linux

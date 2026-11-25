@@ -378,40 +378,6 @@ extension WebBridge {
           try { if (p.setPlaybackQualityRange) p.setPlaybackQualityRange('hd1080', 'highres'); } catch (e) {}
           try { if (p.setPlaybackQuality) p.setPlaybackQuality('hd1080'); } catch (e) {}
         },
-        // Equaliser: route the <video> through Web Audio filters. Audio is only
-        // rerouted once the AudioContext is confirmed running (so it can never go
-        // silent), and never at all while the EQ is off/flat.
-        eq(freqs, gains, enabled) {
-          const v = video(); if (!v) return 'novideo';
-          const st = window.__ytmacEQ;
-          const needed = enabled && gains.some(g => Math.abs(g) > 0.01);
-          if (!st && !needed) return 'skip';
-          if (!st || st.el !== v) {
-            const ac = new (window.AudioContext || window.webkitAudioContext)();
-            ac.resume().then(() => {
-              if (ac.state !== 'running') { ac.close(); return; }
-              try {
-                const src = ac.createMediaElementSource(v);
-                const pre = ac.createGain();
-                const filters = freqs.map((f, i) => {
-                  const b = ac.createBiquadFilter();
-                  b.type = i === 0 ? 'lowshelf' : (i === freqs.length - 1 ? 'highshelf' : 'peaking');
-                  b.frequency.value = f; b.Q.value = 1.0; b.gain.value = 0; return b;
-                });
-                src.connect(pre); let n = pre; filters.forEach(f => { n.connect(f); n = f; }); n.connect(ac.destination);
-                window.__ytmacEQ = { ac, el: v, filters, pre };
-                api.eq(freqs, gains, enabled);
-              } catch (e) { ac.close(); }
-            }).catch(() => {});
-            return 'starting';
-          }
-          const t = st.ac.currentTime;
-          st.filters.forEach((f, i) => f.gain.setTargetAtTime(enabled ? (gains[i] || 0) : 0, t, 0.04));
-          const boost = enabled ? Math.max(0, ...gains) : 0;           // headroom so boosts don't clip
-          st.pre.gain.setTargetAtTime(Math.pow(10, -boost * 0.7 / 20), t, 0.04);
-          if (st.ac.state !== 'running') st.ac.resume();
-          return 'ok';
-        },
         // Repeat one: the song restarts from here, a moment before it ends (see below).
         setLoop(on) { window.__ytmacLoop = !!on; },
         // Smooth volume ramp (0–100) over ms, so switching streams never clicks.
@@ -470,8 +436,12 @@ extension WebBridge {
       window.__ytmac = api;
 
       // Media events don't bubble, but they do reach capture listeners.
+      // While YouTube plays an ad (free accounts), the media element is the ad: its
+      // ending or failing says nothing about the song, so those aren't reported.
+      const adShowing = () => !!document.querySelector('#movie_player.ad-showing, #movie_player.ad-interrupting');
       const relay = (type) => document.addEventListener(type, (e) => {
         if (!(e.target instanceof HTMLMediaElement)) return;
+        if ((type === 'ended' || type === 'error') && adShowing()) return;
         let id = null; try { id = player().getVideoData().video_id; } catch (x) {}
         post({ type, videoId: id, expected, time: e.target.currentTime, duration: e.target.duration });
       }, true);
@@ -483,6 +453,10 @@ extension WebBridge {
       //  - otherwise: tell the app now, so it loads the next song itself.
       let endSentFor = null;
       const endNow = (v) => {
+        if (adShowing()) return;
+        // Only the song itself: its length must match the one the player reports.
+        const p0 = player();
+        if (p0 && p0.getDuration) { const pd = p0.getDuration(); if (pd > 0 && Math.abs(pd - v.duration) > 3) return; }
         if (window.__ytmacLoop) {
           const p = player();
           if (p && p.seekTo) p.seekTo(0, true); else v.currentTime = 0;

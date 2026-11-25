@@ -78,10 +78,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Every page in the Back history keeps its content in memory, so a long session
+    /// of clicking through albums and artists would grow without limit. Keep the most
+    /// recent ones (trimmed in batches, so this rarely happens).
+    static let historyLimit = 20
+
     func push(_ r: Route) {
         showNowPlaying = false
         forward = []
         path.append(r)
+        if path.count > Self.historyLimit + 5 { path.removeFirst(path.count - Self.historyLimit) }
     }
 
     /// Bumped by the Refresh button; pages reload when it changes.

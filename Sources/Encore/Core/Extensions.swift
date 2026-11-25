@@ -67,32 +67,3 @@ final class SponsorBlock {
     }
 }
 
-// MARK: - Equalizer
-
-/// Routes YouTube's audio through a Web Audio equaliser inside the player page.
-@MainActor
-final class Equalizer {
-    static let shared = Equalizer()
-    private var bag = Set<AnyCancellable>()
-
-    func start() {
-        let p = Prefs.shared
-        p.$eqEnabled.combineLatest(p.$eqGains)
-            .debounce(for: .milliseconds(60), scheduler: RunLoop.main)
-            .sink { [weak self] _, _ in self?.apply() }
-            .store(in: &bag)
-        NotificationCenter.default.publisher(for: .ytBridgeReady)
-            .sink { [weak self] _ in self?.apply() }.store(in: &bag)
-        NotificationCenter.default.publisher(for: .trackChanged)
-            .delay(for: .seconds(1.5), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.apply() }.store(in: &bag)
-    }
-
-    func apply() {
-        let p = Prefs.shared
-        let gains = p.eqEnabled ? p.eqGains : Array(repeating: 0, count: Prefs.eqBands.count)
-        let bands = Prefs.eqBands.map { String($0) }.joined(separator: ",")
-        let g = gains.map { String(format: "%.2f", $0) }.joined(separator: ",")
-        Task { await WebBridge.shared.js("window.__ytmac && window.__ytmac.eq([\(bands)], [\(g)], \(p.eqEnabled))") }
-    }
-}

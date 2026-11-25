@@ -69,7 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ScrollActivity.start()
             WebBridge.shared.start()
             NowPlayingService.shared.start()
-            Equalizer.shared.start()
             AppIcon.start()
             Task { await AppModel.shared.refreshAccount() }
         }

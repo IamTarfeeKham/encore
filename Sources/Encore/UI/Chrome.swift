@@ -280,8 +280,12 @@ struct HoverTip: ViewModifier {
                         .allowsHitTesting(false)
                         .transition(.opacity.combined(with: .scale(scale: 0.92)))
                         .zIndex(100)
+                        .accessibilityHidden(true)
                 }
             }
+            // The tooltip's words are also the control's name for VoiceOver (otherwise
+            // icon buttons are read out by their symbol names, e.g. "Go Forward").
+            .accessibilityLabel(Text(text))
     }
 }
 

@@ -46,6 +46,8 @@ struct ContentView: View {
                     .modifier(PanelNudge(progress: model.sidebarVisible ? 1 : 0,
                                          shown: model.sidebarVisible,
                                          distance: sidebarWidth + Self.panelGap))
+                    // VoiceOver skips what's out of sight (here: under Now Playing).
+                    .accessibilityHidden(model.showNowPlaying)
 
                 ResizableSidebar()
                     .padding(.top, Self.topBarHeight + 6)
@@ -54,6 +56,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .offset(x: model.sidebarVisible ? 0 : -(sidebarWidth + Self.panelGap * 3))
                     .allowsHitTesting(model.sidebarVisible)
+                    .accessibilityHidden(!model.sidebarVisible || model.showNowPlaying)
                     .onPreferenceChange(SidebarWidthKey.self) { w in
                         if abs(w - sidebarWidth) > 0.5 { sidebarWidth = w }
                     }
@@ -72,6 +75,7 @@ struct ContentView: View {
                     // geometry at all, so it stays smooth.
                     .opacity(model.showQueue ? 1 : 0)
                     .allowsHitTesting(model.showQueue)
+                    .accessibilityHidden(!model.showQueue)
                     .zIndex(model.showNowPlaying ? 1.5 : 0.25)
 
                 VStack {

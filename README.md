@@ -19,9 +19,11 @@
 ## Features
 
 - **Native SwiftUI app.** Sidebar, artwork grids, album, playlist and artist pages, a rich search page with live suggestions, Home sections you can hide, and a Speed Dial of your pinned items plus recently played songs.
+- **Endless Home and Explore.** After YouTube's own sections run out, Encore keeps adding "Because you listened to…" sections. Pull down at the top to refresh.
 - **Now Playing.** Full-window player with an artwork-coloured animated background that reacts to your cursor, Song/Video switching (HD video), and an Up Next list.
 - **Synced lyrics.** Word-by-word karaoke highlighting, using Better Lyrics word timings, LRCLIB line timings, or YouTube Music's own lyrics.
-- **Queue.** Reorder, remove, shuffle, repeat and autoplay ("radio"), plus a play history.
+- **Queue.** Reorder, remove, shuffle, repeat and autoplay ("radio"), plus a play history. Repeat one loops without a gap.
+- **Crossfade.** Songs fade out at the end and the next one fades in (Off to 12 seconds), with a Smart mode that plays albums straight through.
 - **macOS integration.** Media keys, Now Playing and Control Center, AirPods controls, a Dock menu, a menu bar player, a floating mini player, a sleep timer and playback speed.
 - **Customisation.**
   - Light/dark appearance, any accent colour, and a Liquid Glass / Frosted / Solid look with adjustable transparency.
@@ -29,7 +31,6 @@
   - Rebindable keyboard shortcuts.
 - **Built-in extensions.**
   - SponsorBlock skips non-music sections of music videos.
-  - An 8-band equaliser with presets.
   - Auto-skip for songs you've disliked.
 
 ## Requirements
@@ -88,6 +89,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more.
 
 - Encore is unofficial, so a change to music.youtube.com can break something until it's updated.
 - There are no offline downloads: YouTube restricts downloads to its own apps.
+- There's no built-in equaliser: Apple's web engine doesn't let apps process YouTube's audio stream. A system-wide equaliser app still works.
 - **macOS and Apple Silicon only, for now.** See [Roadmap](#roadmap).
 
 ## Roadmap

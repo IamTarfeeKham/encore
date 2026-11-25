@@ -689,3 +689,45 @@ struct OverhangLayout: Layout {
                     proposal: ProposedViewSize(width: width ?? bounds.width, height: bounds.height))
     }
 }
+
+// MARK: - Left-packed grids
+
+/// Items in rows of fixed-width columns, packed from the left so the first column
+/// lines up with the page title, with as many columns as fit. (An adaptive grid centres
+/// its columns and splits the leftover space between both sides.)
+struct LeadingGrid<Item: Identifiable, Cell: View>: View {
+    let items: [Item]
+    var columnWidth: CGFloat
+    var spacing: CGFloat = 20
+    var rowSpacing: CGFloat = 26
+    @ViewBuilder let cell: (Item) -> Cell
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        let columns = max(1, Int((width + spacing) / (columnWidth + spacing)))
+        let gridWidth = CGFloat(columns) * columnWidth + CGFloat(columns - 1) * spacing
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(columnWidth), spacing: spacing, alignment: .top), count: columns),
+                  alignment: .leading, spacing: rowSpacing) {
+            ForEach(items) { cell($0) }
+        }
+        // Exactly as wide as its columns (so none of the leftover space ends up on the
+        // left), inside a frame that takes whatever width is offered and never asks for
+        // more (minWidth 0), so the grid can't widen the page.
+        .frame(width: gridWidth, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { width = g.size.width }
+                .onChange(of: g.size.width) { _, w in width = w }
+        })
+    }
+}
+
+/// Album / playlist / artist cards in a left-packed grid.
+struct CardGrid: View {
+    let items: [MediaItem]
+    var cardWidth: CGFloat = 170
+    var body: some View {
+        LeadingGrid(items: items, columnWidth: cardWidth) { CardView(item: $0, width: cardWidth) }
+    }
+}

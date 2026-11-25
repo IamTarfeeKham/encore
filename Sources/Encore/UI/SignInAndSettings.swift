@@ -354,6 +354,18 @@ struct SettingsView: View {
                 SettingsRow("Playback speed") {
                     PillMenu(selection: $player.playbackRate, options: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map { ($0, $0 == 1 ? "Normal" : String(format: "%g×", $0)) })
                 }
+                SettingsRow("Crossfade", detail: "Fades each song out at the end and the next one in. On repeat one, the song dips briefly and loops straight back. Also in the player bar (♪→♪).") {
+                    HStack(spacing: 10) {
+                        Slider(value: $player.fadeSeconds, in: 0...12, step: 1).frame(width: 160)
+                        Text(player.fadeSeconds > 0 ? "\(Int(player.fadeSeconds)) s" : "Off")
+                            .font(.system(size: 12).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                }
+                SettingsToggle("Smart crossfade", $player.smartFade,
+                               detail: "Songs from the same album play straight through with no fade, short songs get a shorter fade, and fade-ins stay brief.")
+                    .disabled(player.fadeSeconds == 0)
                 SettingsToggle("Remember queue and position after quitting", $prefs.rememberQueue)
                 SettingsRow("Sleep timer") {
                     Menu(player.sleepAt.map { "Until \($0.formatted(date: .omitted, time: .shortened))" } ?? (player.sleepAtEndOfTrack ? "End of song" : "Off")) {
@@ -382,17 +394,10 @@ struct SettingsView: View {
                 }
             }
             SettingsCard("Equalizer") {
-                SettingsToggle("Equalizer", $prefs.eqEnabled,
-                               detail: "Shape the sound with presets or your own settings. Applies to everything you play.")
-                SettingsRow("Preset", detail: "Choose a starting point, then fine-tune the bands below.") {
-                    PillMenu(selection: Binding(get: { prefs.eqPreset }, set: { name in
-                        prefs.eqPreset = name
-                        if let g = Prefs.eqPresets.first(where: { $0.0 == name })?.1 { withAnimation(.easeOut(duration: 0.25)) { prefs.eqGains = g } }
-                    }), options: (Prefs.eqPresets.map { ($0.0, $0.0) } + [("Custom", "Custom")]))
-                }
-                EqualizerBands(gains: $prefs.eqGains, enabled: prefs.eqEnabled) { prefs.eqPreset = "Custom" }
-                    .padding(.vertical, 14)
-                ButtonRow { ResetButton("Reset Equalizer") { prefs.eqPreset = "Flat"; prefs.eqGains = Array(repeating: 0, count: 8) } }
+                // Apple's web engine hands Web Audio pure silence for YouTube's audio
+                // stream (measured: peak level 0 while a song plays), so a Web Audio
+                // equaliser can only mute the music. It's switched off for good.
+                SettingsNote("Not available. Apple's web engine doesn't let apps reach YouTube's audio stream, so an equaliser here could only silence the music. Your Mac's own sound settings, or a system-wide equaliser app, still work with Encore.")
             }
             SettingsCard("Playback helpers") {
                 SettingsToggle("Auto-skip disliked songs", $prefs.autoSkipDisliked,
@@ -617,91 +622,5 @@ struct ResetButton: View {
         Button(action: action) { Label(title, systemImage: "arrow.counterclockwise").font(.system(size: 12.5, weight: .bold)) }
             .buttonStyle(CapsuleButtonStyle(prominent: false))
             .controlSize(.large)
-    }
-}
-
-
-/// Eight vertical band sliders with frequency labels.
-struct EqualizerBands: View {
-    @Binding var gains: [Double]
-    let enabled: Bool
-    let onEdit: () -> Void
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            VStack(alignment: .trailing) {
-                Text("+12 dB"); Spacer(); Text("0"); Spacer(); Text("−12 dB")
-            }
-            .font(.system(size: 10, weight: .medium).monospacedDigit())
-            .foregroundStyle(.secondary)
-            .frame(height: 140)
-            .padding(.trailing, 10)
-            ForEach(Array(Prefs.eqBands.enumerated()), id: \.offset) { i, f in
-                VStack(spacing: 8) {
-                    VerticalBandSlider(value: Binding(get: { gains.indices.contains(i) ? gains[i] : 0 },
-                                                      set: { v in
-                                                          var g = gains
-                                                          while g.count < Prefs.eqBands.count { g.append(0) }
-                                                          g[i] = (v * 2).rounded() / 2
-                                                          gains = g
-                                                          onEdit()
-                                                      }))
-                        .frame(width: 30, height: 140)
-                    Text(f >= 1000 ? "\(Int(f / 1000))k" : "\(Int(f))")
-                        .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .opacity(enabled ? 1 : 0.45)
-        .disabled(!enabled)
-    }
-}
-
-
-/// A drawn vertical slider (−12…+12 dB): track, fill from the centre line, knob,
-/// and the value while dragging.
-struct VerticalBandSlider: View {
-    @Binding var value: Double
-    @State private var dragging = false
-    @State private var hover = false
-
-    var body: some View {
-        GeometryReader { g in
-            let h = g.size.height
-            let y = h / 2 - CGFloat(value / 12) * (h / 2 - 8)
-            ZStack(alignment: .top) {
-                Capsule().fill(Color.primary.opacity(0.14)).frame(width: 4).frame(maxHeight: .infinity)
-                Rectangle().fill(Color.primary.opacity(0.25)).frame(width: 12, height: 1).offset(y: h / 2)
-                Capsule().fill(Color.accentColor)
-                    .frame(width: 4, height: abs(y - h / 2))
-                    .offset(y: min(y, h / 2))
-                Circle().fill(.white)
-                    .frame(width: dragging || hover ? 16 : 13, height: dragging || hover ? 16 : 13)
-                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                    .offset(y: y - (dragging || hover ? 8 : 6.5))
-                if dragging {
-                    Text(String(format: "%+.1f", value))
-                        .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Capsule().fill(Color.black.opacity(0.8)))
-                        .foregroundStyle(.white)
-                        .fixedSize()
-                        .offset(y: y - 30)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { v in
-                    dragging = true
-                    let t = (h / 2 - v.location.y) / (h / 2 - 8)
-                    value = max(-12, min(12, Double(t) * 12))
-                }
-                .onEnded { _ in dragging = false })
-            .onHover { hover = $0 }
-            .animation(.easeOut(duration: 0.12), value: hover)
-        }
     }
 }

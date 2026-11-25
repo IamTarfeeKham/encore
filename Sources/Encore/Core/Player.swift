@@ -172,9 +172,12 @@ final class PlayerController: ObservableObject {
         // Right after you press play or pause, the page can still report the old state
         // for a moment; trust your press until it catches up (so the button doesn't
         // flip back and forth). A finished track (state 0) always wins.
+        // Buffering mid-song (after a seek, or a slow network) still counts as playing,
+        // so the play/pause button doesn't flicker to "play" and back.
+        let shownPlaying = playing || (s.state == 3 && isPlaying)
         let settling = Date() < expectStateUntil && s.state != 0
-        if settling && playing == isPlaying { expectStateUntil = .distantPast }
-        if !settling, playing != isPlaying && (fresh || !playing) { isPlaying = playing; now.isPlaying = playing }
+        if settling && shownPlaying == isPlaying { expectStateUntil = .distantPast }
+        if !settling, shownPlaying != isPlaying && (fresh || !shownPlaying) { isPlaying = shownPlaying; now.isPlaying = shownPlaying }
         // SponsorBlock: jump over non-music / sponsor segments.
         if fresh, playing, let seg = SponsorBlock.shared.check(time: s.time, videoId: s.videoId) {
             seek(to: seg.end)
@@ -394,6 +397,9 @@ final class PlayerController: ObservableObject {
     func seek(to t: Double) {
         clock.jump(to: t)
         bridge.seek(to: t)
+        // The page may report "paused" for a moment while it jumps: keep showing the
+        // state it was in.
+        if isPlaying { expectStateUntil = max(expectStateUntil, Date().addingTimeInterval(1)) }
     }
 
     func skip(by seconds: Double) { seek(to: max(0, min(clock.duration, clock.time + seconds))) }
@@ -476,7 +482,28 @@ final class PlayerController: ObservableObject {
         if repeatMode == .one { seek(to: 0); bridge.play(); return }
         // The song faded out; let the next one fade in.
         if fadingOut && !gaplessEnding { fadeInNextLoad = true }
-        next()
+        if let i = index, i + 1 < queue.count || (repeatMode == .all && !queue.isEmpty) {
+            next()
+            return
+        }
+        // End of the queue. Pause now, before YouTube's page can start a song of its
+        // own (which the app would then "correct" by restarting this one).
+        bridge.pause()
+        guard autoplay else { stopAtEnd(); return }
+        Task {
+            await fetchMoreIfNeeded()
+            if let i = index, i + 1 < queue.count { next() } else { stopAtEnd() }
+        }
+    }
+
+    /// Nothing left to play: stop on this song, back at its start, at normal volume
+    /// (undoing a crossfade's fade-out), ready to play again.
+    private func stopAtEnd() {
+        fadeInNextLoad = false
+        fadingOut = false
+        pause()
+        seek(to: 0)
+        bridge.setVolume(muted ? 0 : volume)
     }
 
     /// Starts the fade-out near the end of a song, and fades back in when the song

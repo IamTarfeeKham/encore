@@ -25,6 +25,8 @@ struct FeedView: View {
     let rows: [FeedRow]
     /// Changes when the whole feed is replaced (another chip, a reload).
     let resetKey: String
+    /// Whether more sections can still be loaded at the end.
+    var canLoadMore = false
     var onNearEnd: () -> Void = {}
     var onPull: (CGFloat) -> Void = { _ in }
 
@@ -56,11 +58,13 @@ struct FeedView: View {
         .onAppear { sync() }
         .onChange(of: rows.map(\.id)) { _, _ in sync() }
         .onChange(of: resetKey) { _, _ in model.reset(); sync() }
+        .onChange(of: canLoadMore) { _, v in model.canLoadMore = v }
     }
 
     private func sync() {
         model.onNearEnd = onNearEnd
         model.onPull = onPull
+        model.canLoadMore = canLoadMore
         model.setRows(rows.map { FeedModel.Meta(id: $0.id, estimate: $0.estimate, spacing: $0.spacing) })
     }
 }
@@ -82,6 +86,7 @@ final class FeedModel: ObservableObject {
     private(set) var heights: [String: CGFloat] = [:]
     var onNearEnd: () -> Void = {}
     var onPull: (CGFloat) -> Void = { _ in }
+    var canLoadMore = false
 
     /// True while the page width is changing; see FeedView.
     @Published private(set) var frozen = false
@@ -139,10 +144,24 @@ final class FeedModel: ObservableObject {
     private var viewport: CGFloat = 900
     private var idleScheduled = false
     private var nearEndFiredForCount = -1
+    private var lastNearEnd = Date.distantPast
+    private var retryScheduled = false
+
+    /// While the end of the feed is in reach, check back in a few seconds (idle steps
+    /// otherwise stop once everything nearby is built).
+    private func scheduleRetryCheck() {
+        guard !retryScheduled else { return }
+        retryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { [weak self] in
+            guard let self else { return }
+            self.retryScheduled = false
+            self.scheduleIdle()
+        }
+    }
     private var lastPull: CGFloat = 0
 
     func reset() {
-        built = []; heights = [:]; nearEndFiredForCount = -1
+        built = []; heights = [:]; nearEndFiredForCount = -1; lastNearEnd = .distantPast
     }
 
     func setRows(_ new: [Meta]) {
@@ -212,9 +231,14 @@ final class FeedModel: ObservableObject {
         guard !rows.isEmpty else { return }
         if ScrollActivity.isScrolling || frozen { if !frozen { scheduleIdle() }; return }
         let ahead = range(from: top - viewport, to: top + viewport * 5)
-        if let last = rows.indices.last, ahead.contains(last), nearEndFiredForCount != rows.count {
+        // Ask for more when the end comes within reach; ask again every few seconds
+        // while it stays there (a load that failed or added nothing mustn't stall it).
+        if canLoadMore, let last = rows.indices.last, ahead.contains(last),
+           nearEndFiredForCount != rows.count || Date().timeIntervalSince(lastNearEnd) > 3 {
             nearEndFiredForCount = rows.count
+            lastNearEnd = Date()
             onNearEnd()
+            scheduleRetryCheck()
         }
         let below = ahead.filter { offsets[$0] >= top }
         let above = ahead.filter { offsets[$0] < top }.reversed()
