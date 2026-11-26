@@ -1,4 +1,5 @@
 import Combine
+import ObjectiveC
 import SwiftUI
 
 // MARK: - Playing Next (queue inspector)
@@ -253,7 +254,8 @@ struct FloatingWindow: NSViewRepresentable {
             w.isOpaque = false
             // No system frame (its corners don't match ours): the window is just the
             // rounded card, with our own buttons and a shadow that follows its shape.
-            w.styleMask = [.borderless, .fullSizeContentView]
+            w.styleMask = [.borderless, .fullSizeContentView, .miniaturizable]
+            MiniPlayer.makeKeyable(w)
             w.hasShadow = true
             w.invalidateShadow()
             // Measure the shadow again once the rounded glass has drawn (measured too
@@ -288,6 +290,26 @@ struct FloatingWindow: NSViewRepresentable {
 @MainActor
 enum MiniPlayer {
     static var window: NSWindow? { NSApp.windows.first { $0.title == "Mini Player" } }
+
+    /// A frameless window can't take the keyboard, so ⌘W went to the main window.
+    /// Give the mini player's window a subclass that can, and whose Close (⌘W) fades
+    /// it out like its own red button.
+    static func makeKeyable(_ w: NSWindow) {
+        guard let base = object_getClass(w) else { return }
+        let name = "EncoreMiniWindow_" + NSStringFromClass(base)
+        var sub: AnyClass? = NSClassFromString(name)
+        if sub == nil, let made = objc_allocateClassPair(base, name, 0) {
+            let yes: @convention(block) (AnyObject) -> Bool = { _ in true }
+            class_addMethod(made, #selector(getter: NSWindow.canBecomeKey), imp_implementationWithBlock(yes), "c@:")
+            let close: @convention(block) (NSWindow, Any?) -> Void = { win, _ in
+                MainActor.assumeIsolated { MiniPlayer.close(win) }
+            }
+            class_addMethod(made, #selector(NSWindow.performClose(_:)), imp_implementationWithBlock(close), "v@:@")
+            objc_registerClassPair(made)
+            sub = made
+        }
+        if let sub, object_getClass(w) != sub { object_setClass(w, sub) }
+    }
 
     static func toggle(_ open: OpenWindowAction) {
         if let w = window, w.isVisible, w.alphaValue > 0.5 {

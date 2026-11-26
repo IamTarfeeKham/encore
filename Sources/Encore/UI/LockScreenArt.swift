@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import AVKit
 import CoreImage
 import SwiftUI
 
@@ -168,15 +169,15 @@ private struct LockScreenView: View {
                         .transition(.opacity)
                 }
                 VStack(spacing: 22) {
-                    if expanded {
-                        cover(side: min(h * 0.42, w * 0.4), radius: 16)
-                            .onTapGesture { toggle() }
-                            .accessibilityLabel("Back to the normal lock screen")
-                    }
+                    // Like the iPhone: the cover above the controls; tap it for the art
+                    // full screen, tap again to go back.
+                    cover(side: expanded ? min(h * 0.42, w * 0.4) : min(h * 0.3, cardWidth * 0.8), radius: 16)
+                        .onTapGesture { toggle() }
+                        .accessibilityLabel(expanded ? "Back to the normal lock screen" : "Show the cover full screen")
+                        .accessibilityAddTraits(.isButton)
                     card(width: cardWidth)
                 }
-                // Lower down, just above the account and password area (like Canopy).
-                .padding(.top, expanded ? h * 0.25 : h * 0.55)
+                .padding(.top, expanded ? h * 0.25 : h * 0.24)
                 .frame(maxWidth: .infinity)
             }
             .foregroundStyle(.white)
@@ -203,29 +204,73 @@ private struct LockScreenView: View {
             .contentShape(Rectangle())
     }
 
-    /// The media card: cover (click to fill the screen), song, wavy progress, controls.
+    /// The media card, laid out like the iPhone's: song in the middle with a sound
+    /// indicator, progress with the times beside it, controls and an output picker.
     private func card(width: CGFloat) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                if !expanded {
-                    cover(side: 50, radius: 9)
-                        .onTapGesture { toggle() }
-                        .accessibilityLabel("Show the cover full screen")
-                        .accessibilityAddTraits(.isButton)
+        VStack(spacing: 12) {
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: 2) {
+                    Text(player.current?.title ?? "").font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                    Text(player.current?.artistLine ?? "").font(.system(size: 14)).opacity(0.6).lineLimit(1)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(player.current?.title ?? "").font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    Text(player.current?.artistLine ?? "").font(.system(size: 12.5)).opacity(0.7).lineLimit(1)
-                }
-                Spacer(minLength: 0)
+                .padding(.horizontal, 30)
+                .frame(maxWidth: .infinity)
+                Image(systemName: "waveform")
+                    .font(.system(size: 13, weight: .semibold))
+                    .symbolEffect(.variableColor.iterative, isActive: player.isPlaying)
+                    .opacity(0.55)
             }
-            WaveScrubber(accent: accent)
-            LockControls()
+            AppleScrubber()
+            ZStack {
+                LockControls()
+                HStack { Spacer(); RoutePicker().frame(width: 30, height: 30).opacity(0.7) }
+            }
         }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
+        .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 12)
         .frame(width: width)
-        .lockGlass(22)
+        .lockGlass(26)
     }
+}
+
+/// A plain progress bar with the times on either side, like the iPhone's.
+private struct AppleScrubber: View {
+    @ObservedObject private var player = PlayerController.shared
+    @EnvironmentObject private var clock: PlaybackClock
+    @State private var drag: Double?
+    private func fmt(_ t: Double) -> String { let s = max(0, Int(t.rounded())); return String(format: "%d:%02d", s / 60, s % 60) }
+    var body: some View {
+        let d = max(clock.duration, 1)
+        let f = drag ?? min(max(clock.time / d, 0), 1)
+        HStack(spacing: 10) {
+            Text(fmt(f * clock.duration)).frame(width: 36, alignment: .leading)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.25))
+                    Capsule().fill(.white.opacity(0.75)).frame(width: g.size.width * f)
+                }
+                .frame(height: 7)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { v in drag = min(max(v.location.x / g.size.width, 0), 1) }
+                    .onEnded { v in player.seek(to: min(max(v.location.x / g.size.width, 0), 1) * d); drag = nil })
+            }
+            .frame(height: 16)
+            Text("-" + fmt(clock.duration - f * clock.duration)).frame(width: 40, alignment: .trailing)
+        }
+        .font(.system(size: 12, weight: .medium)).monospacedDigit().opacity(0.75)
+    }
+}
+
+/// The system's AirPlay / output picker: choose where the music plays.
+private struct RoutePicker: NSViewRepresentable {
+    func makeNSView(context: Context) -> AVRoutePickerView {
+        let v = AVRoutePickerView()
+        v.isRoutePickerButtonBordered = false
+        v.setRoutePickerButtonColor(.white, for: .normal)
+        return v
+    }
+    func updateNSView(_ v: AVRoutePickerView, context: Context) {}
 }
 
 private extension View {
@@ -240,14 +285,14 @@ private struct LockControls: View {
     @ObservedObject private var player = PlayerController.shared
     var body: some View {
         HStack(spacing: 38) {
-            Button { player.previous() } label: { Image(systemName: "backward.fill").font(.system(size: 19)) }
+            Button { player.previous() } label: { Image(systemName: "backward.fill").font(.system(size: 24)) }
             Button { player.togglePlayPause() } label: {
                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 26))
+                    .font(.system(size: 32))
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: 30)
             }
-            Button { player.next() } label: { Image(systemName: "forward.fill").font(.system(size: 19)) }
+            Button { player.next() } label: { Image(systemName: "forward.fill").font(.system(size: 24)) }
         }
         .buttonStyle(LockGlyphStyle())
     }

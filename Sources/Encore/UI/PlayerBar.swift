@@ -15,6 +15,7 @@ struct PlayerBar: View {
             let compact = g.size.width < 1200
             // Half- and quarter-screen windows: fewer buttons, tighter transport.
             let narrow = g.size.width < 980
+            let _ = updateWidth(g.size.width)
             HStack(spacing: 0) {
                 nowPlaying(narrow: narrow)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -48,6 +49,11 @@ struct PlayerBar: View {
         }
         .glassPanel(22, dense: true)
         .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+    }
+
+    @State private var barWidth: CGFloat = 1400
+    private func updateWidth(_ w: CGFloat) {
+        if abs(w - barWidth) > 1 { DispatchQueue.main.async { barWidth = w } }
     }
 
     private struct Separator: View {
@@ -104,18 +110,21 @@ struct PlayerBar: View {
                          videoId: t.videoId, artists: t.artists, album: t.album, duration: t.duration)
     }
 
+    private var veryNarrow: Bool { barWidth < 820 }
     private func right(compact: Bool, narrow: Bool) -> some View {
         HStack(spacing: 0) {
-            if !narrow {
+            // The slider narrows with the window; only very narrow windows swap it
+            // for a speaker button (no sudden jumps).
+            if !veryNarrow {
                 VolumeControl()
-                    .frame(minWidth: 110, maxWidth: compact ? 150 : 230)
-                    .padding(.leading, compact ? 12 : 20)
+                    .frame(minWidth: narrow ? 70 : 110, maxWidth: narrow ? 100 : (compact ? 150 : 230))
+                    .padding(.leading, narrow ? 8 : (compact ? 12 : 20))
             }
             Spacer(minLength: narrow ? 8 : 14)
             HStack(spacing: narrow ? 4 : (compact ? 8 : 16)) {
                 // No room for the slider: a speaker button (that opens it) joins the
                 // other buttons, so there's no empty gap.
-                if narrow { CompactVolumeButton() }
+                if veryNarrow { CompactVolumeButton() }
                 // Always lands on the lyrics (even from the Artwork view); closes them if showing.
                 let lyricsShown = model.showNowPlaying && prefs.nowPlayingLayout == .lyrics
                 Button {
@@ -133,7 +142,7 @@ struct PlayerBar: View {
                 Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: { Image(systemName: "list.bullet") }
                     .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                     .hoverTip("Queue")
-                if !narrow { FadeControl() }
+                FadeControl()
                 Button { MiniPlayer.toggle(openWindow) } label: {
                     Image(systemName: model.miniPlayerOpen ? "pip.fill" : "pip")
                 }
