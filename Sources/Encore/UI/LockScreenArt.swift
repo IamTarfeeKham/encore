@@ -171,13 +171,14 @@ private struct LockScreenView: View {
                 VStack(spacing: 22) {
                     // Like the iPhone: the cover above the controls; tap it for the art
                     // full screen, tap again to go back.
-                    cover(side: expanded ? min(h * 0.42, w * 0.4) : min(h * 0.3, cardWidth * 0.8), radius: 16)
+                    cover(side: expanded ? min(h * 0.42, w * 0.4) : min(h * 0.27, cardWidth * 0.75), radius: 16)
                         .onTapGesture { toggle() }
                         .accessibilityLabel(expanded ? "Back to the normal lock screen" : "Show the cover full screen")
                         .accessibilityAddTraits(.isButton)
                     card(width: cardWidth)
                 }
-                .padding(.top, expanded ? h * 0.25 : h * 0.24)
+                // Clear of the system clock above and the account and password below.
+                .padding(.top, expanded ? h * 0.25 : h * 0.29)
                 .frame(maxWidth: .infinity)
             }
             .foregroundStyle(.white)

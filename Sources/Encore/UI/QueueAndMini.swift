@@ -1,5 +1,4 @@
 import Combine
-import ObjectiveC
 import SwiftUI
 
 // MARK: - Playing Next (queue inspector)
@@ -255,7 +254,7 @@ struct FloatingWindow: NSViewRepresentable {
             // No system frame (its corners don't match ours): the window is just the
             // rounded card, with our own buttons and a shadow that follows its shape.
             w.styleMask = [.borderless, .fullSizeContentView, .miniaturizable]
-            MiniPlayer.makeKeyable(w)
+            MiniPlayer.installKeyHandling()
             w.hasShadow = true
             w.invalidateShadow()
             // Measure the shadow again once the rounded glass has drawn (measured too
@@ -275,11 +274,7 @@ struct FloatingWindow: NSViewRepresentable {
             // Fade in (no pop), and fade out on close.
             w.animationBehavior = .utilityWindow
             w.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.22
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                w.animator().alphaValue = 1
-            }
+            MiniPlayer.fade(w, to: 1, duration: 0.22)
         }
         return v
     }
@@ -291,24 +286,29 @@ struct FloatingWindow: NSViewRepresentable {
 enum MiniPlayer {
     static var window: NSWindow? { NSApp.windows.first { $0.title == "Mini Player" } }
 
-    /// A frameless window can't take the keyboard, so ⌘W went to the main window.
-    /// Give the mini player's window a subclass that can, and whose Close (⌘W) fades
-    /// it out like its own red button.
-    static func makeKeyable(_ w: NSWindow) {
-        guard let base = object_getClass(w) else { return }
-        let name = "EncoreMiniWindow_" + NSStringFromClass(base)
-        var sub: AnyClass? = NSClassFromString(name)
-        if sub == nil, let made = objc_allocateClassPair(base, name, 0) {
-            let yes: @convention(block) (AnyObject) -> Bool = { _ in true }
-            class_addMethod(made, #selector(getter: NSWindow.canBecomeKey), imp_implementationWithBlock(yes), "c@:")
-            let close: @convention(block) (NSWindow, Any?) -> Void = { win, _ in
-                MainActor.assumeIsolated { MiniPlayer.close(win) }
+    /// The mini player has no title bar, so it can't take the keyboard and ⌘W/⌘M
+    /// would reach the main window. Instead: after you click the mini player (until
+    /// you click another window), ⌘W fades it closed and ⌘M minimises it.
+    private static var lastClicked = false
+    private static var monitors: [Any] = []
+
+    static func installKeyHandling() {
+        guard monitors.isEmpty else { return }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { e in
+            MainActor.assumeIsolated { lastClicked = e.window != nil && e.window === window }
+            return e
+        }) { monitors.append(m) }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { e in
+            MainActor.assumeIsolated {
+                guard lastClicked, let w = window, w.isVisible,
+                      e.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return e }
+                switch e.charactersIgnoringModifiers?.lowercased() {
+                case "w": lastClicked = false; close(w); return nil
+                case "m": w.miniaturize(nil); return nil
+                default: return e
+                }
             }
-            class_addMethod(made, #selector(NSWindow.performClose(_:)), imp_implementationWithBlock(close), "v@:@")
-            objc_registerClassPair(made)
-            sub = made
-        }
-        if let sub, object_getClass(w) != sub { object_setClass(w, sub) }
+        }) { monitors.append(m) }
     }
 
     static func toggle(_ open: OpenWindowAction) {
@@ -330,29 +330,33 @@ enum MiniPlayer {
             if !w.isVisible { w.alphaValue = 0; w.orderFrontRegardless() }
             if w.alphaValue < 0.99 {
                 w.alphaValue = 0
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.22
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    w.animator().alphaValue = 1
-                }
+                fade(w, to: 1, duration: 0.22)
             }
         }
     }
 
     /// Fade out, close, and leave the window ready to show again.
     static func close(_ w: NSWindow, then done: (() -> Void)? = nil) {
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            w.animator().alphaValue = 0
-        }, completionHandler: {
+        fade(w, to: 0, duration: 0.2) {
+            if let done { done() } else { w.close() }
+            w.orderOut(nil)
+            w.alphaValue = 1
+            AppModel.shared.miniPlayerOpen = false
+        }
+    }
+
+    /// Fades the window's opacity with an ease-out curve. (AppKit's own window
+    /// animator can't handle the keyboard-ready window class, so this steps it.)
+    static func fade(_ w: NSWindow, to target: CGFloat, duration: Double, then done: (() -> Void)? = nil) {
+        let start = w.alphaValue, began = CACurrentMediaTime()
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { t in
             MainActor.assumeIsolated {
-                if let done { done() } else { w.close() }
-                w.orderOut(nil)
-                w.alphaValue = 1
-                AppModel.shared.miniPlayerOpen = false
+                let p = min((CACurrentMediaTime() - began) / duration, 1)
+                let eased = 1 - pow(1 - p, 3)
+                w.alphaValue = start + (target - start) * eased
+                if p >= 1 { t.invalidate(); done?() }
             }
-        })
+        }
     }
 }
 

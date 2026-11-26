@@ -17,7 +17,8 @@ struct PlayerBar: View {
             let narrow = g.size.width < 980
             let _ = updateWidth(g.size.width)
             HStack(spacing: 0) {
-                nowPlaying(narrow: narrow)
+                // Like / dislike / more step aside a little earlier, so the title stays readable.
+                nowPlaying(narrow: g.size.width < 1100)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Separator()
                 VStack(spacing: 2) {
@@ -47,6 +48,8 @@ struct PlayerBar: View {
                 .onTapGesture {}
                 .onHover { _ in }
         }
+        // Frosted under the glass, so songs scrolling behind are blurred, not readable.
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .glassPanel(22, dense: true)
         .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
     }
@@ -117,7 +120,8 @@ struct PlayerBar: View {
             // for a speaker button (no sudden jumps).
             if !veryNarrow {
                 VolumeControl()
-                    .frame(minWidth: narrow ? 70 : 110, maxWidth: narrow ? 100 : (compact ? 150 : 230))
+                    .frame(width: narrow ? 100 : nil)
+                    .frame(minWidth: narrow ? nil : 110, maxWidth: narrow ? nil : (compact ? 150 : 230))
                     .padding(.leading, narrow ? 8 : (compact ? 12 : 20))
             }
             Spacer(minLength: narrow ? 8 : 14)
