@@ -126,6 +126,8 @@ final class Updater: ObservableObject {
         s = s.replacingOccurrences(of: "<li>", with: "• ")
         s = s.replacingOccurrences(of: "</h2>", with: "\n").replacingOccurrences(of: "</li>", with: "\n")
         s = s.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        // The checksum is for GitHub downloads; not useful in the prompt.
+        s = s.components(separatedBy: "\n").filter { !$0.hasPrefix("SHA-256") }.joined(separator: "\n")
         return s.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -192,23 +194,14 @@ final class Updater: ObservableObject {
                 phase = "Downloading \(AppInfo.name) \(release.version)…"
                 var zipReq = URLRequest(url: release.zip)
                 zipReq.setValue("Encore-Updater", forHTTPHeaderField: "User-Agent")
-                let (stream, response) = try await URLSession.shared.bytes(for: zipReq)
-                let total = max(response.expectedContentLength, 1)
-                var data = Data(); data.reserveCapacity(Int(total))
-                var buffer = [UInt8](); buffer.reserveCapacity(65_536)
-                for try await byte in stream {
-                    buffer.append(byte)
-                    if buffer.count == 65_536 {
-                        data.append(contentsOf: buffer); buffer.removeAll(keepingCapacity: true)
-                        progress = Double(data.count) / Double(total)
-                        bytesText = String(format: "%.1f of %.1f MB", Double(data.count) / 1_048_576, Double(total) / 1_048_576)
+                let data = try await UpdateDownload.fetch(zipReq) { done, total in
+                    Task { @MainActor in
+                        let u = Updater.shared
+                        u.progress = total > 0 ? Double(done) / Double(total) : 0
+                        u.bytesText = String(format: "%.1f of %.1f MB", Double(done) / 1_048_576, Double(max(total, done)) / 1_048_576)
                     }
                 }
-                data.append(contentsOf: buffer)
                 progress = 1
-                guard (response as? HTTPURLResponse)?.statusCode == 200, data.count > 1000 else {
-                    throw APIError.message("The download didn't finish.")
-                }
                 phase = "Installing… \(AppInfo.name) will reopen in a moment."
                 bytesText = ""
                 let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -232,7 +225,12 @@ final class Updater: ObservableObject {
                 let config = NSWorkspace.OpenConfiguration()
                 config.activates = false
                 config.createsNewApplicationInstance = true
-                _ = try await NSWorkspace.shared.openApplication(at: helperURL, configuration: config)
+                // Start the installer without waiting: it's a background tool that never
+                // reports "finished launching", so waiting held the app open ~25 s.
+                NSWorkspace.shared.openApplication(at: helperURL, configuration: config) { _, error in
+                    if let error { Task { @MainActor in Updater.shared.status = .failed(error.localizedDescription) } }
+                }
+                try? await Task.sleep(nanoseconds: 400_000_000)
                 PlayerController.shared.save()
                 if relaunch {
                     try? await Task.sleep(nanoseconds: 700_000_000)   // let "Installing…" be seen
@@ -324,5 +322,50 @@ private struct UpdateProgressView: View {
         }
         .padding(.horizontal, 22).padding(.top, 28).padding(.bottom, 18)
         .frame(width: 360)
+    }
+}
+
+
+/// Downloads a file with progress reports (fast: whole chunks, not byte by byte).
+private final class UpdateDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private var data = Data()
+    private var expected: Int64 = 0
+    private let progress: (Int64, Int64) -> Void
+    private var continuation: CheckedContinuation<Data, Error>?
+
+    private init(progress: @escaping (Int64, Int64) -> Void) { self.progress = progress }
+
+    static func fetch(_ request: URLRequest, progress: @escaping (Int64, Int64) -> Void) async throws -> Data {
+        let d = UpdateDownload(progress: progress)
+        let session = URLSession(configuration: .ephemeral, delegate: d, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await withCheckedThrowingContinuation { c in
+            d.continuation = c
+            session.dataTask(with: request).resume()
+        }
+    }
+
+    func urlSession(_ s: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        expected = response.expectedContentLength
+        if expected > 0 { data.reserveCapacity(Int(expected)) }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            continuation?.resume(throwing: APIError.message("The download didn't start (\((response as? HTTPURLResponse)?.statusCode ?? 0)).")); continuation = nil
+            completionHandler(.cancel); return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ s: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        data.append(chunk)
+        progress(Int64(data.count), expected)
+    }
+
+    func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let c = continuation else { return }
+        continuation = nil
+        if let error { c.resume(throwing: error) }
+        else if data.count < 1000 { c.resume(throwing: APIError.message("The download didn't finish.")) }
+        else { c.resume(returning: data) }
     }
 }

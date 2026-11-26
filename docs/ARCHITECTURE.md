@@ -61,13 +61,13 @@ Timing defaults follow Better Lyrics:
 | `Components.swift` | Cards (fixed size, so carousels never measure them), shelf carousels, track rows, left-packed grids |
 | `PlayerBar.swift` | Player bar, transport, scrubber, volume, crossfade |
 | `NowPlayingView.swift` | Now Playing (Lyrics and Artwork views), the lyrics pane, the breathing cover (Core Animation), video host |
-| `LockScreenArt.swift` | The lock screen player: a non-activating panel placed above the lock screen through a private window-server space (SkyLight, looked up at run time), shown only while the screen is locked and music plays. Moving cover background (Core Animation), clock, controls, a clear gap over the password box; it checks the window order at lock and drops the gap and clock if the system's own lock UI draws above it |
+| `LockScreenArt.swift` | The lock screen player: a non-activating panel placed above the lock screen through a private window-server space (SkyLight, looked up at run time), shown only while the screen is locked and music plays. An iPhone-style card (cover, title, progress, controls, AirPlay output picker) on tinted Liquid Glass; clicking the cover fills the screen with the art (sharp, fitted, over a blurred copy) |
 | `Uploads.swift` | Library › Uploads: uploaded songs, albums, artists (with "more" pages) and uploading files (the same two-step upload music.youtube.com uses) |
 | `UserExtensionsView.swift` | Settings for the user's own JavaScript extensions |
 
 Other parts:
 
-- `Core/Updater.swift` checks the repository's releases feed and hands installs to `Sources/EncoreUpdater` (bundled as `Contents/Helpers/Encore Updater.app`, not sandboxed), which verifies the zip's Ed25519 signature against the release key, moves the old copy to the Trash, installs the new one and reopens it. `scripts/package.sh` signs each release zip with the key in `~/.config/encore/update-signing-key` (kept off the repository).
+- `Core/Updater.swift` reads the repository's releases feed, downloads the new zip with progress, and hands it to `Sources/EncoreUpdater` (bundled as `Contents/Helpers/Encore Updater.app`, not sandboxed) through a request file in the app's container, since a sandboxed app can't pass launch arguments. The helper verifies the zip's Ed25519 signature against the release key, checks the bundle ID, keeps the app's custom name (re-signing it), moves the old copy to the Trash, installs the new one and reopens it. `scripts/package.sh` signs each release zip with the key in `~/.config/encore/update-signing-key` (kept off the repository).
 - `Core/WidgetFeed.swift` writes what's playing to `~/Library/Application Support/Encore Widget/` for the WidgetKit extension in `Sources/EncoreWidgets` (bundled in `Contents/PlugIns`), and acts on its buttons.
 - `Core/UserExtensions.swift` runs the user's extensions in JavaScriptCore with a small `encore` API.
 | `QueueAndMini.swift` | Queue inspector, mini player, menu bar player |
