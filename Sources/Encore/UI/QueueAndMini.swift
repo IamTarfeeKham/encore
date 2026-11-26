@@ -153,7 +153,7 @@ struct MiniPlayerView: View {
                     Text(player.current?.artistLine ?? "").font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
                 }
                 .padding(.horizontal, 20)
-                ScrubberBar().padding(.horizontal, 16)
+                ScrubberBar().padding(.horizontal, 16).miniControlArea("scrubber")
                 HStack(spacing: 18) {
                     Button { player.toggleLike() } label: {
                         Image(systemName: player.likeStatus == .like ? "hand.thumbsup.fill" : "hand.thumbsup")
@@ -167,17 +167,18 @@ struct MiniPlayerView: View {
                     .buttonStyle(BarIconStyle(size: 12))
                     .hoverTip("Open full player")
                 }
+                .miniControlArea("transport")
                 .padding(.bottom, 18)
             }
             .foregroundStyle(.white)
             MiniWindowButtons(close: { fadeOut { dismissWindow(id: "mini") } },
                               minimize: { NSApp.windows.first { $0.title == "Mini Player" }?.miniaturize(nil) },
                               expand: { openFullPlayer() })
+                .miniControlArea("windowButtons")
                 .padding(.leading, 12).padding(.top, 11)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 300, height: 470)
-        .windowDraggable()
         .playerSurface(glass: prefs.glassMiniPlayers, radius: 24)
         // Our own rounded shadow, in a clear margin around the card. (The system's
         // window shadow is measured from the window's pixels and could come out as a
@@ -288,6 +289,15 @@ enum MiniPlayer {
     /// Clear space around the card for its shadow.
     static let shadowMargin: CGFloat = 22
 
+    /// Where the mini player's controls are (window coordinates, top-left origin):
+    /// a press anywhere else drags the window.
+    static var controlFrames: [String: CGRect] = [:]
+
+    static func isOverControl(_ p: NSPoint, in content: NSView) -> Bool {
+        let flipped = CGPoint(x: p.x, y: content.bounds.height - p.y)
+        return controlFrames.values.contains { $0.insetBy(dx: -6, dy: -6).contains(flipped) }
+    }
+
     /// The mini player has no title bar, so it can't take the keyboard and ⌘W/⌘M
     /// would reach the main window. Instead: after you click the mini player (until
     /// you click another window), ⌘W fades it closed and ⌘M minimises it.
@@ -297,8 +307,18 @@ enum MiniPlayer {
     static func installKeyHandling() {
         guard monitors.isEmpty else { return }
         if let m = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { e in
-            MainActor.assumeIsolated { lastClicked = e.window != nil && e.window === window }
-            return e
+            MainActor.assumeIsolated {
+                lastClicked = e.window != nil && e.window === window
+                // Drag the mini player from anywhere that isn't a control. (It has no
+                // title bar, and SwiftUI's drag gesture missed most of the card: the
+                // cover is an AppKit view and the gaps between items aren't hit areas.)
+                if lastClicked, e.type == .leftMouseDown, e.clickCount == 1, let w = e.window,
+                   let content = w.contentView, !isOverControl(e.locationInWindow, in: content) {
+                    w.performDrag(with: e)
+                    return nil
+                }
+                return e
+            }
         }) { monitors.append(m) }
         if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { e in
             MainActor.assumeIsolated {
@@ -500,24 +520,16 @@ struct CardShadow: View {
 }
 
 extension View {
-    /// Drag the window from anywhere on this view that isn't a control.
-    @ViewBuilder func windowDraggable() -> some View {
-        if #available(macOS 15.0, *) {
-            gesture(WindowDragGesture()).allowsWindowActivationEvents(true)
-        } else {
-            background(CardDragArea())
+    /// Marks a group of mini player controls, so pressing there doesn't drag the window.
+    func miniControlArea(_ id: String) -> some View {
+        background {
+            GeometryReader { g in
+                Color.clear
+                    .onAppear { MiniPlayer.controlFrames[id] = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { _, f in MiniPlayer.controlFrames[id] = f }
+            }
         }
     }
-}
-
-/// macOS 14: an AppKit view under the content that moves the window when dragged.
-private struct CardDragArea: NSViewRepresentable {
-    final class DragView: NSView {
-        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
-        override var mouseDownCanMoveWindow: Bool { true }
-    }
-    func makeNSView(context: Context) -> NSView { DragView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 
