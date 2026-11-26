@@ -158,13 +158,7 @@ struct MiniPlayerView: View {
                     .buttonStyle(BarIconStyle(size: 13))
                     .hoverTip("Like")
                     TransportControls(size: .regular, showShuffleRepeat: false)
-                    Button {
-                        // Back to the main window, straight into Now Playing; the mini player closes.
-                        WindowOpener.open = WindowOpener.open ?? openWindow
-                        WindowOpener.showMain()
-                        withAnimation(.spring(duration: 0.45)) { AppModel.shared.showNowPlaying = true }
-                        dismissWindow(id: "mini")
-                    } label: {
+                    Button { openFullPlayer() } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                     }
                     .buttonStyle(BarIconStyle(size: 12))
@@ -173,10 +167,77 @@ struct MiniPlayerView: View {
                 .padding(.bottom, 18)
             }
             .foregroundStyle(.white)
+            MiniWindowButtons(close: { fadeOut { dismissWindow(id: "mini") } },
+                              minimize: { NSApp.windows.first { $0.title == "Mini Player" }?.miniaturize(nil) },
+                              expand: { openFullPlayer() })
+                .padding(.leading, 12).padding(.top, 11)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 300, height: 470)
+        .ignoresSafeArea()
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .glassRim(24)
         .environment(\.colorScheme, .dark)
         .background(FloatingWindow())
+        .background(RoundedWindow(radius: 24))
+    }
+
+    private func fadeOut(then done: @escaping () -> Void) {
+        let mini = NSApp.windows.first { $0.title == "Mini Player" }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            mini?.animator().alphaValue = 0
+        }, completionHandler: { MainActor.assumeIsolated { done() } })
+    }
+
+    private func openFullPlayer() {
+                        // Back to the main window, straight into Now Playing; the mini player
+                        // fades out. If the main window was hidden, Now Playing is already in
+                        // place when it appears (no slide racing the window); if it's on screen,
+                        // Now Playing slides up as usual.
+                        WindowOpener.open = WindowOpener.open ?? openWindow
+                        let mainOnScreen = WindowOpener.mainWindow.map { $0.isVisible && !$0.isMiniaturized && !NSApp.isHidden } ?? false
+                        if mainOnScreen {
+                            withAnimation(.spring(duration: 0.45, bounce: 0.12)) { AppModel.shared.showNowPlaying = true }
+                        } else {
+                            var t = Transaction(); t.disablesAnimations = true
+                            withTransaction(t) { AppModel.shared.showNowPlaying = true }
+                        }
+                        WindowOpener.showMain()
+                        fadeOut { dismissWindow(id: "mini") }
+    }
+}
+
+/// Larger window buttons for the mini player (macOS's own are fixed at 12 pt):
+/// close, minimise, and green opens the full player. Symbols show on hover, like
+/// the system ones.
+private struct MiniWindowButtons: View {
+    let close: () -> Void
+    let minimize: () -> Void
+    let expand: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 9) {
+            dot(Color(red: 1, green: 0.37, blue: 0.34), "xmark", "Close", close)
+            dot(Color(red: 1, green: 0.74, blue: 0.18), "minus", "Minimise", minimize)
+            dot(Color(red: 0.16, green: 0.79, blue: 0.25), "arrow.up.left.and.arrow.down.right", "Open full player", expand)
+        }
+        .onHover { hover = $0 }
+    }
+
+    private func dot(_ color: Color, _ symbol: String, _ label: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Circle().fill(color)
+                .overlay(Circle().strokeBorder(.black.opacity(0.18), lineWidth: 0.5))
+                .overlay(Image(systemName: symbol).font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(.black.opacity(0.6)).opacity(hover ? 1 : 0))
+                .frame(width: 16, height: 16)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 
@@ -190,7 +251,25 @@ struct FloatingWindow: NSViewRepresentable {
             w.isMovableByWindowBackground = true
             w.titlebarAppearsTransparent = true
             w.collectionBehavior.insert(.canJoinAllSpaces)
-            w.backgroundColor = .black
+            w.backgroundColor = .clear
+            w.isOpaque = false
+            // No system frame (its corners don't match ours): the window is just the
+            // rounded card, with our own buttons and a shadow that follows its shape.
+            w.styleMask = [.borderless, .fullSizeContentView]
+            w.hasShadow = true
+            w.invalidateShadow()
+            // Our own larger buttons replace the system's small ones.
+            for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                w.standardWindowButton(kind)?.isHidden = true
+            }
+            // Fade in (no pop), and fade out on close.
+            w.animationBehavior = .utilityWindow
+            w.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                w.animator().alphaValue = 1
+            }
         }
         return v
     }
@@ -202,13 +281,18 @@ struct FloatingWindow: NSViewRepresentable {
 struct MenuBarPlayerView: View {
     @EnvironmentObject var player: PlayerController
     @EnvironmentObject var model: AppModel
+    @ObservedObject private var prefs = Prefs.shared
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 14) {
             HStack(spacing: 12) {
-                Artwork(url: player.current?.largeArtwork, cornerRadius: 10, size: 64).frame(width: 64, height: 64)
-                    .shadow(color: .black.opacity(0.3), radius: 6, y: 3)
+                // The same breathing cover as the Artwork view and mini player.
+                TiltingArtwork(url: player.current?.largeArtwork, side: 64,
+                               breathing: player.isPlaying && prefs.artworkMotion && !reduceMotion)
+                    .scaleEffect(player.isPlaying ? 1 : 0.94)
+                    .animation(.spring(duration: 0.5, bounce: 0.25), value: player.isPlaying)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(player.current?.title ?? "Not Playing").font(.system(size: 13.5, weight: .semibold)).lineLimit(2)
                     Text(player.current?.artistLine ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
@@ -236,6 +320,9 @@ struct MenuBarPlayerView: View {
         .frame(width: 320)
         // Takes on the cover's colours, like the app's background (dark, so text stays readable).
         .background(AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.42, parallax: 0, energy: 1.2))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassRim(18)
+        .background(RoundedWindow(radius: 18))
         .environment(\.colorScheme, .dark)
     }
 }
@@ -263,5 +350,48 @@ struct QueueHeader<Trailing: View>: View {
         .listRowBackground(Color.clear)
         .moveDisabled(true)
         .deleteDisabled(true)
+    }
+}
+
+
+/// Gives the menu bar dropdown's window rounder corners than the system default:
+/// a clear window, with the content clipped to the given radius.
+struct RoundedWindow: NSViewRepresentable {
+    let radius: CGFloat
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async {
+            guard let w = v.window else { return }
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.hasShadow = true
+            if let frame = w.contentView?.superview {
+                frame.wantsLayer = true
+                frame.layer?.cornerRadius = radius
+                frame.layer?.cornerCurve = .continuous
+                frame.layer?.masksToBounds = true
+            }
+            w.invalidateShadow()
+        }
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+
+extension View {
+    /// A Liquid Glass edge: a thin rim that catches the light at the top and fades
+    /// around the sides, with a faint inner glow.
+    func glassRim(_ radius: CGFloat) -> some View {
+        overlay {
+            let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+            shape.strokeBorder(LinearGradient(stops: [.init(color: .white.opacity(0.55), location: 0),
+                                                      .init(color: .white.opacity(0.12), location: 0.35),
+                                                      .init(color: .white.opacity(0.06), location: 0.7),
+                                                      .init(color: .white.opacity(0.22), location: 1)],
+                                              startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+                .overlay(shape.inset(by: 1.2).strokeBorder(.white.opacity(0.07), lineWidth: 3).blur(radius: 2))
+                .allowsHitTesting(false)
+        }
     }
 }
