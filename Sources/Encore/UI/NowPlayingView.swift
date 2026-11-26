@@ -6,7 +6,15 @@ struct NowPlayingView: View {
     @EnvironmentObject var player: PlayerController
     @EnvironmentObject var model: AppModel
     @StateObject private var lyrics = LyricsService.shared
-    @AppStorage("showLyrics") private var showLyrics = true
+    @ObservedObject private var prefs = Prefs.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The Artwork view: just the cover, big, where the lyrics (or Up Next) would be.
+    /// The Lyrics view is the cover beside the lyrics, or beside Up Next for a song
+    /// without lyrics. Switched at the top of Now Playing (and in Settings › Lyrics).
+    private var artworkOnly: Bool { prefs.nowPlayingLayout == .artwork }
+    /// The artwork view moves gently (unless turned off, or Reduce Motion is on).
+    private var artworkMoves: Bool { artworkOnly && prefs.artworkMotion && !reduceMotion }
 
     var body: some View {
         ZStack {
@@ -15,7 +23,8 @@ struct NowPlayingView: View {
                 // keep this layer transparent apart from the controls.
                 Color.clear
             } else {
-                AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.3, parallax: 1.5)
+                AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.3, parallax: 1.5,
+                                  energy: artworkMoves ? 1.7 : 1)
                 content
             }
             VStack { topBar; Spacer() }
@@ -39,31 +48,39 @@ struct NowPlayingView: View {
             .hoverTip("Close", edge: .bottom)
             .padding(.leading, 76)  // clear of the window buttons
             Spacer()
+            HStack(spacing: 10) {
+                // Lyrics (cover + lyrics, or cover + Up Next) or Artwork (just the cover).
+                if !player.videoMode {
+                    PillPicker(selection: $prefs.nowPlayingLayout,
+                               options: [(.lyrics, "Lyrics", "quote.bubble"), (.artwork, "Artwork", "photo")], onGlass: true,
+                               iconOnly: true, tipEdge: .bottom)
+                        .glassPanel(18)
+                        .transition(.opacity)
+                }
+                HStack(spacing: 2) {
+                    Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: {
+                        Image(systemName: "list.bullet")
+                            .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
+                    }
+                    .hoverTip("Queue", edge: .bottom)
+                    Menu {
+                        if let item = currentItem { ItemMenu(item: item) }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.button).menuIndicator(.hidden)
+                    .hoverTip("More", edge: .bottom)
+                }
+                // No inset: the end buttons' hover circles meet the capsule's ends exactly.
+                .buttonStyle(BarIconStyle(size: 14, diameter: 36))
+                .glassPanel(18)
+            }
+        }
+        // Song / Video stays in the middle of the window, whatever sits either side.
+        .overlay {
             PillPicker(selection: Binding(get: { player.videoMode }, set: { player.setVideoMode($0) }),
                        options: [(false, "Song", "music.note"), (true, "Video", "play.rectangle")], onGlass: true)
                 .glassPanel(18)
-            Spacer()
-            HStack(spacing: 2) {
-                Button { withAnimation(.spring(duration: 0.4)) { showLyrics.toggle() } } label: {
-                    Image(systemName: showLyrics ? "quote.bubble.fill" : "quote.bubble")
-                }
-                .hoverTip(showLyrics ? "Hide lyrics" : "Show lyrics", edge: .bottom)
-                Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: {
-                    Image(systemName: "list.bullet")
-                        .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
-                }
-                .hoverTip("Queue", edge: .bottom)
-                Menu {
-                    if let item = currentItem { ItemMenu(item: item) }
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuStyle(.button).menuIndicator(.hidden)
-                .hoverTip("More", edge: .bottom)
-            }
-            // No inset: the end buttons' hover circles meet the capsule's ends exactly.
-            .buttonStyle(BarIconStyle(size: 14, diameter: 36))
-            .glassPanel(18)
         }
         .padding(.horizontal, 20)
         // Row centre at half the top-bar height, level with the window buttons.
@@ -79,7 +96,7 @@ struct NowPlayingView: View {
 
     private var content: some View {
         GeometryReader { g in
-            let wide = g.size.width > 880 && showLyrics
+            let wide = g.size.width > 880 && !artworkOnly
             if wide {
                 HStack(spacing: 64) {
                     artworkColumn(maxSide: min(g.size.width * 0.34, g.size.height - 250))
@@ -91,7 +108,7 @@ struct NowPlayingView: View {
                 .padding(.horizontal, 70)
                 .padding(.top, 60)
                 .padding(.bottom, PlayerBar.height + 24)
-            } else if showLyrics {
+            } else if !artworkOnly {
                 // Narrow window: compact song header on top, lyrics below.
                 VStack(alignment: .leading, spacing: 18) {
                     if let t = player.current {
@@ -130,7 +147,7 @@ struct NowPlayingView: View {
         let side = max(maxSide, 200)
         return VStack(alignment: .leading, spacing: 18) {
             Spacer(minLength: 0)
-            TiltingArtwork(url: player.current?.largeArtwork, side: side)
+            TiltingArtwork(url: player.current?.largeArtwork, side: side, breathing: artworkMoves && player.isPlaying)
                 .scaleEffect(player.isPlaying ? 1 : 0.92)
                 .animation(.spring(duration: 0.6, bounce: 0.25), value: player.isPlaying)
             if let t = player.current {
@@ -153,9 +170,25 @@ struct NowPlayingView: View {
     }
 }
 
-/// Artwork that tilts toward the cursor. Isolated so pointer movement only
-/// re-renders this view, not the lyrics.
+/// The big cover: tilts toward the cursor and, in the Artwork view, "breathes"
+/// (a slow scale and float).
 struct TiltingArtwork: View {
+    let url: URL?
+    let side: CGFloat
+    var breathing = false
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        BreathingHost(active: breathing) {
+            TiltCard(url: url, side: side).environment(\.colorScheme, scheme)
+        }
+        .frame(width: side, height: side)
+    }
+}
+
+/// The cover and its shadow, tilting a little toward the pointer. Isolated so
+/// pointer movement only re-renders this, not the lyrics.
+private struct TiltCard: View {
     let url: URL?
     let side: CGFloat
     @ObservedObject private var pointer = PointerTracker.shared
@@ -166,6 +199,131 @@ struct TiltingArtwork: View {
             .rotation3DEffect(.degrees((pointer.point.y - 0.5) * -7), axis: (x: 1, y: 0, z: 0), perspective: 0.6)
             .rotation3DEffect(.degrees((pointer.point.x - 0.5) * 9), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
             .animation(.spring(response: 0.9, dampingFraction: 0.8), value: pointer.point)
+    }
+}
+
+/// Shows its content in a layer that can "breathe" — a slow scale (7 s) and float
+/// (11 s) — animated by Core Animation alone, so nothing in SwiftUI or AppKit runs
+/// while it moves. (Driving it from SwiftUI made the window lay itself out 30
+/// times a second: about a third of a CPU core.) The content may draw outside the
+/// frame (shadow, tilt), and clicks pass through to whatever is underneath.
+private struct BreathingHost<Content: View>: NSViewRepresentable {
+    var active: Bool
+    @ViewBuilder var content: () -> Content
+
+    func makeNSView(context: Context) -> BreathingView<Content> { BreathingView(rootView: content()) }
+    func updateNSView(_ v: BreathingView<Content>, context: Context) {
+        v.host.rootView = BreathingRoot(content: content())
+        v.setActive(active)
+    }
+}
+
+private struct BreathingRoot<Content: View>: View {
+    let content: Content
+    var body: some View {
+        content.frame(maxWidth: .infinity, maxHeight: .infinity).ignoresSafeArea()
+    }
+}
+
+private let breatheDepth: CGFloat = 0.018, breathePeriod: CFTimeInterval = 7
+private let floatHeight: CGFloat = 4, floatPeriod: CFTimeInterval = 11
+
+private final class BreathingView<Content: View>: NSView {
+    let host: NSHostingView<BreathingRoot<Content>>
+    /// Room around the frame for the shadow, the tilt and the breathing itself.
+    private let margin: CGFloat = 110
+    private var active = false
+    /// When the current breathing began (the motion keeps its phase across re-layouts).
+    private var startedAt: CFTimeInterval = 0
+
+    init(rootView: Content) {
+        host = NSHostingView(rootView: BreathingRoot(content: rootView))
+        super.init(frame: .zero)
+        wantsLayer = true
+        clipsToBounds = false
+        host.sizingOptions = []
+        host.safeAreaRegions = []
+        host.wantsLayer = true
+        addSubview(host)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }   // never steal clicks
+
+    override func layout() {
+        super.layout()
+        let f = bounds.insetBy(dx: -margin, dy: -margin)
+        guard host.frame != f else { return }
+        host.frame = f
+        if active { breathe() }   // new centre, same phase
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if active, window != nil, host.layer?.animation(forKey: "breathe") == nil { breathe() }
+    }
+
+    func setActive(_ on: Bool) {
+        guard on != active else { return }
+        active = on
+        if on {
+            startedAt = CACurrentMediaTime()
+            host.layer?.removeAnimation(forKey: "settle")
+            breathe()
+        } else {
+            settle()
+        }
+    }
+
+    /// The layer's centre, relative to its anchor point (which transforms pivot on).
+    private func centre(of layer: CALayer) -> CGPoint {
+        CGPoint(x: (0.5 - layer.anchorPoint.x) * layer.bounds.width, y: (0.5 - layer.anchorPoint.y) * layer.bounds.height)
+    }
+
+    /// Scale `s` about `c`, then lift by `y`.
+    private func transform(scale s: CGFloat, lift y: CGFloat, centre c: CGPoint) -> CATransform3D {
+        let m = CATransform3DScale(CATransform3DMakeTranslation(c.x, c.y + y, 0), s, s, 1)
+        return CATransform3DTranslate(m, -c.x, -c.y, 0)
+    }
+
+    private func breathe() {
+        guard let layer = host.layer, layer.bounds.width > 0 else { return }
+        let c = centre(of: layer)
+        let begin = layer.convertTime(startedAt, from: nil)
+        let steps = 48
+        let scale = CAKeyframeAnimation(keyPath: "transform")
+        scale.values = (0...steps).map { i in
+            let s = 1 + breatheDepth * sin(Double(i) / Double(steps) * 2 * .pi)
+            return NSValue(caTransform3D: transform(scale: s, lift: 0, centre: c))
+        }
+        scale.duration = breathePeriod
+        let lift = CAKeyframeAnimation(keyPath: "transform.translation.y")
+        lift.values = (0...steps).map { i in floatHeight * sin(Double(i) / Double(steps) * 2 * .pi) }
+        lift.duration = floatPeriod
+        for (key, a) in [("breathe", scale), ("float", lift)] {
+            a.isAdditive = true
+            a.repeatCount = .infinity
+            a.beginTime = begin
+            a.isRemovedOnCompletion = false
+            layer.add(a, forKey: key)
+        }
+    }
+
+    /// Glide back to rest from wherever the motion is now.
+    private func settle() {
+        guard let layer = host.layer, layer.animation(forKey: "breathe") != nil else { return }
+        let t = CACurrentMediaTime() - startedAt
+        let s = 1 + breatheDepth * sin(t / breathePeriod * 2 * .pi)
+        let y = floatHeight * sin(t / floatPeriod * 2 * .pi)
+        layer.removeAnimation(forKey: "breathe")
+        layer.removeAnimation(forKey: "float")
+        let back = CABasicAnimation(keyPath: "transform")
+        back.fromValue = NSValue(caTransform3D: transform(scale: s, lift: y, centre: centre(of: layer)))
+        back.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        back.isAdditive = true
+        back.duration = 0.9
+        back.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(back, forKey: "settle")
     }
 }
 

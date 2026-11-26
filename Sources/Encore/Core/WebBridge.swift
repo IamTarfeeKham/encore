@@ -1,14 +1,19 @@
 import Foundation
 import WebKit
 import Combine
+import QuartzCore
 
-/// Owns the single hidden WKWebView that runs music.youtube.com.
+/// Owns the hidden WKWebViews that run music.youtube.com.
 ///
-/// Playback is delegated to YouTube's own player inside that page, which means
+/// Playback is delegated to YouTube's own player inside the page, which means
 /// stream deciphering, PoTokens, Premium quality and DRM are all handled by
 /// Google's code. Native code only sends simple commands (load / play / seek)
 /// and receives state events. If Google changes the page, the worst case is
 /// that one command needs a tweak here; the stream itself keeps working.
+///
+/// Normally there is one page. While Crossfade is on there are two: the next song
+/// starts on the other page and the two overlap, then that page becomes "the
+/// player". Everything outside talks to whichever page is playing (`active`).
 @MainActor
 final class WebBridge: NSObject, ObservableObject {
     static let shared = WebBridge()
@@ -40,9 +45,22 @@ final class WebBridge: NSObject, ObservableObject {
         var pageId: String?
     }
 
-    let webView: WKWebView
+    private var pages: [PlayerPage] = []
+    private var activeIndex = 0
+    private var active: PlayerPage { pages[activeIndex] }
+    private var standby: PlayerPage? { pages.count > 1 ? pages[1 - activeIndex] : nil }
+
+    /// The page that's playing now (the one shown in video mode).
+    var webView: WKWebView { active.webView }
+    /// Every player page (two while Crossfade is on).
+    var allWebViews: [WKWebView] { pages.map(\.webView) }
+
     @Published private(set) var pageLoaded = false
     @Published private(set) var snapshot = PlayerSnapshot()
+    /// The second page is up and can start the next song.
+    @Published private(set) var standbyReady = false
+    /// A crossfade is starting or running.
+    @Published private(set) var isCrossfading = false
     private(set) var client = ClientInfo()
 
     /// Called for discrete events: "ended", "playing", "pause", "videochange", "error".
@@ -51,38 +69,36 @@ final class WebBridge: NSObject, ObservableObject {
     private var pollTimer: Timer?
 
     override init() {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()   // persistent cookies = stays signed in
-        config.mediaTypesRequiringUserActionForPlayback = []
-        config.preferences.isElementFullscreenEnabled = true
-        WebBridge.enableMediaSession(config.preferences)
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        let ucc = WKUserContentController()
-        ucc.addUserScript(WKUserScript(source: WebBridge.injectedJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        ucc.addUserScript(WKUserScript(source: WebBridge.injectedCSSJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
-        config.userContentController = ucc
-        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720), configuration: config)
         super.init()
-        webView.customUserAgent = WebBridge.userAgent
-        webView.navigationDelegate = self
-        webView.underPageBackgroundColor = .black
-        webView.setValue(false, forKey: "drawsBackground")
-        ucc.add(WeakHandler(self), name: "ytmac")
+        pages = [PlayerPage(bridge: self)]
     }
 
     /// Lets WebKit use the page's Media Session for the Now Playing entry, so it
     /// shows the app's track info and previous/next buttons (instead of generic
     /// ±15 s skips). WebKit option, applied only when present.
     static func enableMediaSession(_ prefs: WKPreferences) {
-        let sel = NSSelectorFromString("_setMediaSessionEnabled:")
+        setPrivatePref(prefs, "_setMediaSessionEnabled:", true)
+    }
+
+    /// The player pages are never on screen, so WebKit would throttle their timers
+    /// (to about once a second) whenever the app is in the background, slowing
+    /// YouTube's player down there. They're music players: keep them running.
+    static func disableBackgroundThrottling(_ prefs: WKPreferences) {
+        setPrivatePref(prefs, "_setHiddenPageDOMTimerThrottlingEnabled:", false)
+        setPrivatePref(prefs, "_setHiddenPageDOMTimerThrottlingAutoIncreases:", false)
+        setPrivatePref(prefs, "_setPageVisibilityBasedProcessSuppressionEnabled:", false)
+    }
+
+    private static func setPrivatePref(_ prefs: WKPreferences, _ name: String, _ value: Bool) {
+        let sel = NSSelectorFromString(name)
         guard prefs.responds(to: sel), let m = class_getInstanceMethod(type(of: prefs), sel) else { return }
         typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
-        unsafeBitCast(method_getImplementation(m), to: Setter.self)(prefs, sel, true)
+        unsafeBitCast(method_getImplementation(m), to: Setter.self)(prefs, sel, value)
     }
 
     func start() {
-        guard webView.url == nil else { return }
-        webView.load(URLRequest(url: URL(string: WebBridge.origin + "/")!))
+        guard active.webView.url == nil else { return }
+        active.load()
         pollTimer?.invalidate()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
@@ -91,7 +107,8 @@ final class WebBridge: NSObject, ObservableObject {
 
     func reload() {
         pageLoaded = false
-        webView.load(URLRequest(url: URL(string: WebBridge.origin + "/")!))
+        active.loaded = false
+        active.load()
     }
 
     /// Waits until the YTM app has booted (ytcfg + player present), up to `timeout`.
@@ -105,7 +122,7 @@ final class WebBridge: NSObject, ObservableObject {
     // MARK: - Cookies / auth
 
     func cookies() async -> [HTTPCookie] {
-        await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+        await active.webView.configuration.websiteDataStore.httpCookieStore.allCookies()
             .filter { $0.domain.hasSuffix("youtube.com") }
     }
 
@@ -117,7 +134,7 @@ final class WebBridge: NSObject, ObservableObject {
     }
 
     func signOut() async {
-        let store = webView.configuration.websiteDataStore
+        let store = active.webView.configuration.websiteDataStore
         let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: records)
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
@@ -126,14 +143,15 @@ final class WebBridge: NSObject, ObservableObject {
         UserDefaults.standard.removeObject(forKey: "savedQueue")
         client = ClientInfo()
         reload()
+        if let s = standby { s.loaded = false; standbyReady = false; s.load() }
     }
 
-    // MARK: - Player commands
+    // MARK: - Player commands (to the page that's playing)
 
     @discardableResult
     func js(_ code: String) async -> Any? {
         guard pageLoaded else { return nil }
-        return try? await webView.evaluateJavaScript(code)
+        return await active.js(code)
     }
 
     func load(videoId: String, playlistId: String? = nil, start: Double = 0) async {
@@ -151,17 +169,194 @@ final class WebBridge: NSObject, ObservableObject {
         snapshot.time = t
         Task { await js("window.__ytmac && window.__ytmac.seek(\(t))") }
     }
-    func setVolume(_ v: Double) { Task { await js("window.__ytmac && window.__ytmac.volume(\(Int(v.rounded())))") } }
+    func setVolume(_ v: Double) {
+        cancelSingleFade()
+        Task { await js("window.__ytmac && window.__ytmac.volume(\(Int(v.rounded())))") }
+    }
     func setRate(_ r: Double) { Task { await js("window.__ytmac && window.__ytmac.rate(\(r))") } }
     func setVideoMode(_ on: Bool) { Task { await js("window.__ytmac && window.__ytmac.videoMode(\(on))") } }
     func setLoop(_ on: Bool) { Task { await js("window.__ytmac && window.__ytmac.setLoop(\(on))") } }
-    func fade(to volume: Double, ms: Int) async { await js("window.__ytmac && window.__ytmac.fade(\(Int(volume.rounded())), \(ms))") }
     func requestHD() { Task { await js("window.__ytmac && window.__ytmac.hd()") } }
 
-    private func poll() {
+    // MARK: - Volume fades (stepped from here, not by page timers)
+
+    private var singleFade: DispatchSourceTimer?
+
+    /// Moves the playing page's volume to `target` over `ms`, from `from` (or where it
+    /// is now). Stepped by the app about 30 times a second, so it keeps its timing
+    /// when the app is in the background (a page timer would be slowed to a crawl).
+    func fade(from: Double? = nil, to target: Double, ms: Int) async {
+        cancelSingleFade()
+        let page = active
+        let start = from ?? (snapshot.muted ? 0 : snapshot.volume)
+        let length = Double(max(ms, 1)) / 1000
+        let began = CACurrentMediaTime()
+        var last = -1
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(33), leeway: .milliseconds(4))
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                let p = min(1, (CACurrentMediaTime() - began) / length)
+                let v = Int((start + (target - start) * p).rounded())
+                if v != last { last = v; page.run("window.__ytmac && window.__ytmac.volume(\(v))") }
+                if p >= 1 {
+                    timer.cancel()
+                    if self?.singleFade === timer { self?.singleFade = nil }
+                }
+            }
+        }
+        singleFade = timer
+        timer.resume()
+    }
+
+    private func cancelSingleFade() {
+        singleFade?.cancel()
+        singleFade = nil
+    }
+
+    // MARK: - Crossfade (the second page)
+
+    private var crossfadeGeneration = 0
+    private var crossfadeRamp: DispatchSourceTimer?
+
+    /// Creates the second page while Crossfade is on, and closes it when it's off
+    /// (it holds a whole second YouTube Music page in memory).
+    func setStandbyWanted(_ wanted: Bool) {
+        if wanted, pages.count == 1 {
+            let page = PlayerPage(bridge: self)
+            pages.append(page)
+            page.load()
+            NotificationCenter.default.post(name: .playerPagesChanged, object: nil)
+        } else if !wanted, let s = standby, !isCrossfading {
+            let playing = active
+            pages.removeAll { $0 === s }
+            activeIndex = pages.firstIndex { $0 === playing } ?? 0
+            s.close()
+            standbyReady = false
+            NotificationCenter.default.post(name: .playerPagesChanged, object: nil)
+        }
+    }
+
+    /// Starts `videoId` on the second page and crossfades into it over `length` seconds
+    /// (equal-power curves, so the overall loudness stays even). The moment the new
+    /// song is really playing, its page becomes the player and `onSwap` runs; if it
+    /// can't start, `onFail` runs and the current song carries on alone.
+    func crossfade(to videoId: String, length: Double, target: @escaping () -> Double,
+                   onSwap: @escaping () -> Void, onFail: @escaping () -> Void) {
+        guard let next = standby, next.loaded, !isCrossfading else { onFail(); return }
+        let old = active
+        isCrossfading = true
+        crossfadeGeneration += 1
+        let gen = crossfadeGeneration
+        let oldVolume = snapshot.muted ? 0 : snapshot.volume
+        cancelSingleFade()
+        Task {
+            // Start silent (muted before any sound), then wait until it really plays.
+            _ = await next.js("""
+                (function(){ const p = document.querySelector('#movie_player');
+                  window.__ytmac.setLoop(false);
+                  try { p.mute(); p.setVolume(0); } catch (e) {}
+                  window.__ytmac.load('\(videoId.jsEscaped)', null, 0);
+                  try { p.mute(); p.setVolume(0); } catch (e) {}
+                  return 0; })()
+                """)
+            var started = false
+            let deadline = Date().addingTimeInterval(8)
+            while Date() < deadline, gen == crossfadeGeneration {
+                if let d = await next.js("window.__ytmac.state()") as? [String: Any],
+                   (d["videoId"] as? String) == videoId,
+                   (d["state"] as? NSNumber)?.intValue == 1,
+                   ((d["time"] as? NSNumber)?.doubleValue ?? 0) > 0.02 {
+                    started = true
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            guard gen == crossfadeGeneration else { return }       // cancelled meanwhile
+            guard started else {
+                isCrossfading = false
+                next.run("window.__ytmac.pause()")
+                onFail()
+                return
+            }
+            PerfMonitor.note("crossfade: new song playing on the other player; swapping")
+            // The new song is playing (silently): its page becomes the player.
+            old.run("window.__ytmac.setLoop(false); window.__ytmacNP && window.__ytmacNP({ meta: null, state: 'none' })")
+            activeIndex = pages.firstIndex { $0 === next } ?? activeIndex
+            NotificationCenter.default.post(name: .playerPageSwapped, object: nil)
+            onSwap()
+            poll()
+            runCrossfadeRamp(gen: gen, old: old, new: next, oldFrom: oldVolume, length: length, target: target)
+        }
+    }
+
+    private func runCrossfadeRamp(gen: Int, old: PlayerPage, new: PlayerPage, oldFrom: Double,
+                                  length: Double, target: @escaping () -> Double) {
+        let began = CACurrentMediaTime()
+        var lastOld = -1, lastNew = -1, step = 0
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(33), leeway: .milliseconds(4))
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, gen == self.crossfadeGeneration else { timer.cancel(); return }
+                let p = min(1, (CACurrentMediaTime() - began) / max(length, 0.05))
+                let a = p * Double.pi / 2
+                let nv = Int((target() * sin(a)).rounded())
+                let ov = Int((oldFrom * cos(a)).rounded())
+                if nv != lastNew { lastNew = nv; new.run("window.__ytmac.volume(\(nv))") }
+                if ov != lastOld { lastOld = ov; old.run("window.__ytmac.volume(\(ov))") }
+                step += 1
+                if step % 15 == 1 { PerfMonitor.note(String(format: "crossfade ramp %.0f%%: new %d, old %d", p * 100, nv, ov)) }
+                // Developer log: are both players really playing mid-crossfade?
+                if step == 45, UserDefaults.standard.bool(forKey: "perfLog") {
+                    Task {
+                        let o = await old.evaluate("(()=>{const s=window.__ytmac.state();return s.state+'@'+s.time.toFixed(1)})()") as? String ?? "?"
+                        let n = await new.evaluate("(()=>{const s=window.__ytmac.state();return s.state+'@'+s.time.toFixed(1)})()") as? String ?? "?"
+                        PerfMonitor.note("crossfade mid-check: old player \(o), new player \(n) (state 1 = playing)")
+                    }
+                }
+                if p >= 1 {
+                    timer.cancel()
+                    self.crossfadeRamp = nil
+                    old.run("window.__ytmac.pause()")
+                    self.isCrossfading = false
+                    PerfMonitor.note("crossfade done: old player paused")
+                }
+            }
+        }
+        crossfadeRamp = timer
+        timer.resume()
+    }
+
+    /// Stops a crossfade where it is (you paused, skipped, picked another song): the
+    /// other page stops, and the playing one goes to `volume`.
+    func cancelCrossfade(volume: Double) {
+        guard isCrossfading else { return }
+        crossfadeGeneration += 1
+        crossfadeRamp?.cancel()
+        crossfadeRamp = nil
+        isCrossfading = false
+        standby?.run("window.__ytmac && window.__ytmac.pause()")
+        active.run("window.__ytmac && window.__ytmac.volume(\(Int(volume.rounded())))")
+        if UserDefaults.standard.bool(forKey: "perfLog") {
+            let (a, b) = (active, standby)
+            Task {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                let q = "(()=>{const s=window.__ytmac.state();return s.state+' vol '+s.volume})()"
+                let x = await a.evaluate(q) as? String ?? "?"
+                let y = await b?.evaluate(q) as? String ?? "-"
+                PerfMonitor.note("crossfade cancelled: playing player \(x), other player \(y) (2 = paused)")
+            }
+        }
+    }
+
+    // MARK: - State
+
+    /// Reads the playing page's state now (normally every 0.2 s).
+    func poll() {
         guard pageLoaded else { return }
         let sent = Date()
-        webView.evaluateJavaScript("window.__ytmac ? window.__ytmac.state() : null") { [weak self] result, _ in
+        active.webView.evaluateJavaScript("window.__ytmac ? window.__ytmac.state() : null") { [weak self] result, _ in
             guard let self, let d = result as? [String: Any] else { return }
             let received = Date()
             var s = PlayerSnapshot()
@@ -179,21 +374,54 @@ final class WebBridge: NSObject, ObservableObject {
         }
     }
 
-    fileprivate func handle(message: Any) {
+    fileprivate func handle(message: Any, from page: PlayerPage) {
         guard let d = message as? [String: Any], let type = d["type"] as? String else { return }
-        if type == "boot" {
-            Task { await refreshClientInfo() }
-            return
-        }
-        if type == "remote" {   // a Control Center / media-key / AirPods button
+        if type == "remote" {   // a Control Center / media-key / AirPods button, from either page
             NowPlayingService.shared.handleRemote(action: d["action"] as? String ?? "", seekTime: d["seekTime"] as? Double)
             return
         }
+        if type == "boot" {
+            if page === active { Task { await refreshClientInfo() } } else { standbyDidBoot(page) }
+            return
+        }
+        // Only the playing page's song concerns the app (the other one is fading
+        // out, or waiting for the next song).
+        guard page === active else { return }
         onEvent?(type, d)
     }
 
+    fileprivate func pageDidLoad(_ page: PlayerPage) async {
+        if page === active {
+            await refreshClientInfo()
+        } else if (await page.evaluate("!!(window.ytcfg && document.querySelector('#movie_player'))")) as? Bool == true {
+            standbyDidBoot(page)
+        }
+    }
+
+    private func standbyDidBoot(_ page: PlayerPage) {
+        guard page !== active, !page.loaded else { return }
+        PerfMonitor.note("crossfade: second player ready")
+        page.loaded = true
+        standbyReady = true
+        NotificationCenter.default.post(name: .playerPagesChanged, object: nil)
+    }
+
+    fileprivate func pageCrashed(_ page: PlayerPage) {
+        if page === active {
+            // Recover from a crashed web process instead of silently going quiet.
+            pageLoaded = false
+            reload()
+            onEvent?("crashed", [:])
+        } else {
+            page.loaded = false
+            standbyReady = false
+            if isCrossfading { cancelCrossfade(volume: snapshot.volume) }
+            page.load()
+        }
+    }
+
     func refreshClientInfo() async {
-        let r = try? await webView.evaluateJavaScript("""
+        let r = await active.evaluate("""
         (function(){ try { const g = (k)=>window.ytcfg && ytcfg.get(k);
           return JSON.stringify({v:g('INNERTUBE_CLIENT_VERSION'), vd:g('VISITOR_DATA'), hl:g('HL'), gl:g('GL'),
             li:g('LOGGED_IN'), pid:g('DELEGATED_SESSION_ID')}); } catch(e) { return null } })()
@@ -205,25 +433,12 @@ final class WebBridge: NSObject, ObservableObject {
         if let v = j.gl.string { client.gl = v }
         client.loggedIn = j.li.bool ?? false
         client.pageId = j.pid.string
+        active.loaded = true
         if !pageLoaded { pageLoaded = true }
         NotificationCenter.default.post(name: .ytBridgeReady, object: nil)
     }
-}
 
-extension Notification.Name {
-    static let ytBridgeReady = Notification.Name("ytBridgeReady")
-}
-
-extension WebBridge: WKNavigationDelegate {
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Task { @MainActor in
-            // ytcfg is available once the document has loaded.
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            await self.refreshClientInfo()
-        }
-    }
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+    fileprivate static func policy(for navigationAction: WKNavigationAction) -> WKNavigationActionPolicy {
         // Keep the hidden player on music.youtube.com; open anything else externally.
         guard let url = navigationAction.request.url else { return .cancel }
         if url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return .allow }
@@ -234,23 +449,101 @@ extension WebBridge: WKNavigationDelegate {
         }
         return .cancel
     }
+}
+
+extension Notification.Name {
+    static let ytBridgeReady = Notification.Name("ytBridgeReady")
+    /// A player page was added or removed (Crossfade turned on or off).
+    static let playerPagesChanged = Notification.Name("playerPagesChanged")
+    /// The other page became the player (a crossfade started the next song on it).
+    static let playerPageSwapped = Notification.Name("playerPageSwapped")
+}
+
+/// One hidden music.youtube.com page with its own YouTube player.
+@MainActor
+final class PlayerPage: NSObject, WKNavigationDelegate {
+    let webView: WKWebView
+    /// The YouTube Music app inside has booted (ytcfg and the player exist).
+    var loaded = false
+    weak var bridge: WebBridge?
+
+    init(bridge: WebBridge) {
+        self.bridge = bridge
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()   // persistent cookies = stays signed in
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.preferences.isElementFullscreenEnabled = true
+        WebBridge.enableMediaSession(config.preferences)
+        WebBridge.disableBackgroundThrottling(config.preferences)
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+        let ucc = WKUserContentController()
+        ucc.addUserScript(WKUserScript(source: WebBridge.injectedJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        ucc.addUserScript(WKUserScript(source: WebBridge.injectedCSSJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        config.userContentController = ucc
+        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1280, height: 720), configuration: config)
+        super.init()
+        webView.customUserAgent = WebBridge.userAgent
+        webView.navigationDelegate = self
+        webView.underPageBackgroundColor = .black
+        webView.setValue(false, forKey: "drawsBackground")
+        ucc.add(WeakHandler(self), name: "ytmac")
+    }
+
+    func load() {
+        webView.load(URLRequest(url: URL(string: WebBridge.origin + "/")!))
+    }
+
+    /// Runs script once the page has booted (nil before).
+    func js(_ code: String) async -> Any? {
+        guard loaded else { return nil }
+        return try? await webView.evaluateJavaScript(code)
+    }
+
+    /// Runs script whether or not the page has booted.
+    func evaluate(_ code: String) async -> Any? {
+        try? await webView.evaluateJavaScript(code)
+    }
+
+    /// Fire-and-forget (the fast volume steps of a fade).
+    func run(_ code: String) {
+        guard loaded else { return }
+        webView.evaluateJavaScript(code, completionHandler: nil)
+    }
+
+    /// Takes the page down for good (Crossfade turned off).
+    func close() {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "ytmac")
+        webView.removeFromSuperview()
+        loaded = false
+    }
+
+    fileprivate func received(_ body: Any) { bridge?.handle(message: body, from: self) }
+
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor in
+            // ytcfg is available once the document has loaded.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            await self.bridge?.pageDidLoad(self)
+        }
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        WebBridge.policy(for: navigationAction)
+    }
 
     nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        // Recover from a crashed web process instead of silently going quiet.
-        Task { @MainActor in
-            self.pageLoaded = false
-            self.reload()
-            self.onEvent?("crashed", [:])
-        }
+        Task { @MainActor in self.bridge?.pageCrashed(self) }
     }
 }
 
 private final class WeakHandler: NSObject, WKScriptMessageHandler {
-    weak var bridge: WebBridge?
-    init(_ b: WebBridge) { bridge = b }
+    weak var page: PlayerPage?
+    init(_ p: PlayerPage) { page = p }
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         let body = message.body
-        Task { @MainActor in self.bridge?.handle(message: body) }
+        Task { @MainActor in self.page?.received(body) }
     }
 }
 

@@ -2,18 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Encore</string>
-  <key>CFBundleDisplayName</key><string>Encore</string>
-  <key>CFBundleIdentifier</key><string>local.ytmusicmac</string>
-  <key>CFBundleExecutable</key><string>Encore</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.16</string>
-  <key>CFBundleVersion</key><string>17</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSPrincipalClass</key><string>NSApplication</string>
-  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+	<key>CFBundleDisplayName</key>
+	<string>Encore</string>
+	<key>CFBundleExecutable</key>
+	<string>Encore</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.ytmusicmac</string>
+	<key>CFBundleName</key>
+	<string>Encore</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.17</string>
+	<key>CFBundleVersion</key>
+	<string>18</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
 </dict>
 </plist>

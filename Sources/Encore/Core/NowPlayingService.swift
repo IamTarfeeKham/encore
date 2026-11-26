@@ -28,8 +28,11 @@ final class NowPlayingService {
             .filter { abs($0.1 - $0.0) > 1.5 }
             .sink { [weak self] _ in self?.update() }
             .store(in: &bag)
-        // The page reloads its session state when it (re)loads.
+        // The page reloads its session state when it (re)loads; after a crossfade the
+        // other page is the player and needs the details too (even on repeat one,
+        // where the song itself hasn't changed).
         NotificationCenter.default.publisher(for: .ytBridgeReady)
+            .merge(with: NotificationCenter.default.publisher(for: .playerPageSwapped))
             .sink { [weak self] _ in self?.sentMetaFor = nil; self?.update() }
             .store(in: &bag)
 

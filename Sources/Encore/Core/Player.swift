@@ -77,16 +77,35 @@ final class PlayerController: ObservableObject {
 
     @Published private(set) var queue: [Track] = []
     @Published private(set) var index: Int?
-    @Published private(set) var isPlaying = false
+    @Published private(set) var isPlaying = false {
+        didSet { if isPlaying != oldValue { keepAwake(isPlaying) } }
+    }
+    private var playingActivity: NSObjectProtocol?
+    /// While music plays, macOS mustn't nap the app: its fades and song changes are
+    /// timed here. (The Mac itself can still sleep as usual.)
+    private func keepAwake(_ on: Bool) {
+        if on, playingActivity == nil {
+            playingActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep],
+                                                                    reason: "Playing music")
+        } else if !on, let a = playingActivity {
+            ProcessInfo.processInfo.endActivity(a)
+            playingActivity = nil
+        }
+    }
     @Published private(set) var isBuffering = false
     @Published var shuffle = false
-    @Published var repeatMode: RepeatMode = .off { didSet { save(); bridge.setLoop(repeatMode == .one) } }
-    /// Fade between songs, in seconds (0 = off). The current song fades out over its
-    /// last seconds and the next one fades in; a song on repeat-one gets a shorter,
-    /// softer dip and loops straight back to the start.
+    @Published var repeatMode: RepeatMode = .off { didSet { save(); applyLoopMode() } }
+    /// Crossfade length in seconds (0 = off). The next song starts on a second player
+    /// while this one fades out, and the two overlap (repeat one crossfades a song
+    /// into its own start). Without the second player (video mode, or while it starts
+    /// up) the song fades out and the next fades in.
     @Published var fadeSeconds: Double = UserDefaults.standard.object(forKey: "fadeSeconds") as? Double ?? 0 {
         didSet {
             UserDefaults.standard.set(fadeSeconds, forKey: "fadeSeconds")
+            if (oldValue > 0) != (fadeSeconds > 0) {
+                if fadeSeconds == 0 { bridge.setStandbyWanted(false) }
+                applyLoopMode()
+            }
         }
     }
     /// Smart crossfade: consecutive songs from the same album play gaplessly (no
@@ -95,6 +114,20 @@ final class PlayerController: ObservableObject {
         didSet { UserDefaults.standard.set(smartFade, forKey: "smartFade") }
     }
     private var fadingOut = false
+    /// A crossfade to the next song has been asked for (starting or running).
+    private var crossfadeRequested = false
+    /// A crossfade that couldn't start isn't retried for the same song.
+    private var crossfadeSkipFor: UUID?
+    /// The song ended while its crossfade was still starting.
+    private var endedDuringCrossfadeStart = false
+    /// Overlapping crossfade: Crossfade on, the second player ready, not in video mode.
+    private var overlapAvailable: Bool { fadeSeconds > 0 && bridge.standbyReady && !videoMode }
+
+    /// Repeat one loops inside the page (gapless) unless a crossfade does the looping.
+    private func applyLoopMode(standbyReady: Bool? = nil) {
+        let overlap = fadeSeconds > 0 && (standbyReady ?? bridge.standbyReady) && !videoMode
+        bridge.setLoop(repeatMode == .one && !overlap)
+    }
     /// This ending was left gapless (Smart, same album): the next song starts at full volume.
     private var gaplessEnding = false
     private var fadeInNextLoad = false
@@ -106,7 +139,7 @@ final class PlayerController: ObservableObject {
     @Published var volume: Double = UserDefaults.standard.object(forKey: "volume") as? Double ?? 80
     @Published var muted = false
     @Published private(set) var likeStatus: LikeStatus = .indifferent
-    @Published var videoMode = false { didSet { bridge.setVideoMode(videoMode) } }
+    @Published var videoMode = false { didSet { bridge.setVideoMode(videoMode); applyLoopMode() } }
     @Published var playbackRate: Double = 1 { didSet { bridge.setRate(playbackRate) } }
     @Published private(set) var history: [Track] = []
     @Published private(set) var lyricsBrowseId: String?
@@ -153,8 +186,11 @@ final class PlayerController: ObservableObject {
                 self.bridge.setVolume(self.muted ? 0 : self.volume)
                 if self.videoMode { self.bridge.setVideoMode(true) }
                 // A fresh page knows nothing of these yet.
-                self.bridge.setLoop(self.repeatMode == .one)
+                self.applyLoopMode()
             }.store(in: &bag)
+        bridge.$standbyReady.removeDuplicates()
+            .sink { [weak self] ready in self?.applyLoopMode(standbyReady: ready) }
+            .store(in: &bag)
         restore()
     }
 
@@ -363,6 +399,7 @@ final class PlayerController: ObservableObject {
     }
 
     func pause() {
+        stopCrossfade()
         bridge.pause(); isPlaying = false; now.isPlaying = false
         expectStateUntil = Date().addingTimeInterval(1.5)
         clock.sync(time: clock.now(), playing: false, rate: 1)
@@ -395,6 +432,8 @@ final class PlayerController: ObservableObject {
     }
 
     func seek(to t: Double) {
+        // Seeking within a song whose crossfade is still starting keeps that song.
+        if crossfadeRequested { stopCrossfade() }
         clock.jump(to: t)
         bridge.seek(to: t)
         // The page may report "paused" for a moment while it jumps: keep showing the
@@ -478,6 +517,8 @@ final class PlayerController: ObservableObject {
     }
 
     private func trackEnded() {
+        // A crossfade is taking over from this song (or still starting): it does the change.
+        if crossfadeRequested { endedDuringCrossfadeStart = true; return }
         if sleepAtEndOfTrack { sleepAtEndOfTrack = false; fireSleep(); return }
         if repeatMode == .one { seek(to: 0); bridge.play(); return }
         // The song faded out; let the next one fade in.
@@ -509,6 +550,18 @@ final class PlayerController: ObservableObject {
     /// Starts the fade-out near the end of a song, and fades back in when the song
     /// loops (repeat one) or you seek back out of the fade.
     private func updateFade(time: Double, duration: Double, playing: Bool) {
+        // Crossfade's second player (a whole YouTube Music page, ~350 MB) only exists
+        // around the end of a song: it's started 40 s before (ready in about 5) and
+        // closed once a crossfade is over, so most of the time there's just one.
+        if fadeSeconds > 0, !videoMode, playing, duration > 0 {
+            let left = duration - time
+            if left < 40 { bridge.setStandbyWanted(true) }
+            else if left > 90, !bridge.isCrossfading { bridge.setStandbyWanted(false) }
+        }
+        if overlapAvailable {
+            if playing, !sleepAtEndOfTrack, duration > 6 { updateOverlap(time: time, duration: duration) }
+            return
+        }
         var len = effectiveFade
         // Smart: never more than a tenth of the song.
         if smartFade { len = min(len, duration * 0.1) }
@@ -535,6 +588,88 @@ final class PlayerController: ObservableObject {
             PerfMonitor.note(String(format: "crossfade: looped/seeked back, fading in over %.1fs", len))
             Task { await bridge.fade(to: target, ms: Int(len * 1000)) }
         }
+    }
+
+    /// Starts the crossfade to the next song (or, on repeat one, to this song's start)
+    /// a little before the end, so the two overlap for the crossfade length.
+    private func updateOverlap(time: Double, duration: Double) {
+        guard !crossfadeRequested, let cur = current, crossfadeSkipFor != cur.uid else { return }
+        guard let next = repeatMode == .one ? cur : upcoming else { return }   // end of the queue: just end
+        var len = fadeSeconds
+        if smartFade {
+            len = min(len, duration * 0.1)
+            // Albums that run into each other (live albums, mixes): straight through.
+            if repeatMode != .one, Self.sameAlbum(cur, next) { len = 0.4 }
+        }
+        len = max(0.4, len)
+        // A moment early: the next song takes a fraction of a second to begin.
+        let left = duration - time
+        guard left <= len + 1.0, left > 0.9 else { return }
+        crossfadeRequested = true
+        endedDuringCrossfadeStart = false
+        let ramp = min(len, left - 0.7)
+        PerfMonitor.note(String(format: "crossfade: starting next song, overlap %.1fs", ramp))
+        bridge.crossfade(to: next.videoId, length: ramp, target: { [weak self] in
+            guard let self else { return 0 }
+            return self.muted ? 0 : self.volume
+        }, onSwap: { [weak self] in
+            self?.adoptCrossfadedTrack(next)
+        }, onFail: { [weak self] in
+            guard let self else { return }
+            PerfMonitor.note("crossfade: next song didn't start; ending normally")
+            self.crossfadeRequested = false
+            self.crossfadeSkipFor = cur.uid
+            if self.endedDuringCrossfadeStart {
+                self.endedDuringCrossfadeStart = false
+                self.trackEnded()
+            }
+        })
+    }
+
+    /// The crossfade's song is now playing on the other player, which has become the
+    /// player: everything loading a song does, except loading it.
+    private func adoptCrossfadedTrack(_ t: Track) {
+        if repeatMode != .one {
+            if let i = index, i + 1 < queue.count, queue[i + 1].uid == t.uid {
+                addToHistory(); index = i + 1
+            } else if let j = queue.firstIndex(where: { $0.uid == t.uid }) {
+                addToHistory(); index = j
+            }
+        }
+        crossfadeRequested = false
+        crossfadeSkipFor = nil
+        endedDuringCrossfadeStart = false
+        fadingOut = false; gaplessEnding = false; fadeInNextLoad = false
+        needsLoad = false
+        resumeTime = 0
+        reassertCount = 0
+        lastLoadAt = Date()
+        clock.duration = t.duration ?? 0
+        clock.jump(to: 0)
+        clock.sync(time: 0, playing: true, rate: playbackRate)
+        now.videoId = t.videoId
+        PlayStats.shared.record(t)
+        likeStatus = .indifferent
+        lyricsBrowseId = nil
+        lastError = nil
+        isPlaying = true
+        now.isPlaying = true
+        setBuffering(false)
+        applyLoopMode()
+        if playbackRate != 1 { bridge.setRate(playbackRate) }
+        let vid = t.videoId
+        Task { await loadDetails(for: vid) }
+        SponsorBlock.shared.load(videoId: vid)
+        NotificationCenter.default.post(name: .trackChanged, object: nil)
+        save()
+        if let i = index, queue.count - (i + 1) < 3 { Task { await fetchMoreIfNeeded() } }
+    }
+
+    /// Calls off a crossfade (pause, seek, another song picked).
+    private func stopCrossfade() {
+        bridge.cancelCrossfade(volume: muted ? 0 : volume)
+        crossfadeRequested = false
+        endedDuringCrossfadeStart = false
     }
 
     /// The song that plays after this one, if known.
@@ -583,6 +718,7 @@ final class PlayerController: ObservableObject {
 
     private func loadCurrent(autoplay: Bool, start: Double = 0) {
         guard let t = current else { return }
+        stopCrossfade()
         needsLoad = false
         resumeTime = 0
         reassertCount = 0
@@ -604,7 +740,7 @@ final class PlayerController: ObservableObject {
         let songFadeMs = fadeInNextLoad ? Int((smartFade ? min(effectiveFade, 2) : effectiveFade) * 1000) : 0
         fadeInNextLoad = false
         fadingOut = false
-        let loop = repeatMode == .one
+        let loop = repeatMode == .one && !overlapAvailable
         Task {
             await bridge.load(videoId: vid, start: start)
             bridge.setLoop(loop)
@@ -615,7 +751,7 @@ final class PlayerController: ObservableObject {
             if fadeIn || songFadeMs > 0 {
                 bridge.setVolume(0)
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                await bridge.fade(to: target, ms: max(380, songFadeMs))
+                await bridge.fade(from: 0, to: target, ms: max(380, songFadeMs))
             } else {
                 bridge.setVolume(target)
             }

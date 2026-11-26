@@ -21,9 +21,12 @@
 - **Native SwiftUI app.** Sidebar, artwork grids, album, playlist and artist pages, a rich search page with live suggestions, Home sections you can hide, and a Speed Dial of your pinned items plus recently played songs.
 - **Endless Home and Explore.** After YouTube's own sections run out, Encore keeps adding "Because you listened to…" sections. Pull down at the top to refresh.
 - **Now Playing.** Full-window player with an artwork-coloured animated background that reacts to your cursor, Song/Video switching (HD video), and an Up Next list.
+  - Lyrics view: the cover beside the lyrics, or beside Up Next when a song has none.
+  - Artwork view: just the cover, big, breathing slowly (animated by Core Animation, so it costs almost no CPU).
+- **Lock screen.** While music plays, the cover (gently moving) and the song's name appear on the Mac's lock screen, between the clock and the password field. You can turn it off.
 - **Synced lyrics.** Word-by-word karaoke highlighting, using Better Lyrics word timings, LRCLIB line timings, or YouTube Music's own lyrics.
 - **Queue.** Reorder, remove, shuffle, repeat and autoplay ("radio"), plus a play history. Repeat one loops without a gap.
-- **Crossfade.** Songs fade out at the end and the next one fades in (Off to 12 seconds), with a Smart mode that plays albums straight through.
+- **Crossfade.** The next song starts on a second player and plays over the end of the current one (Off to 12 seconds), with a Smart mode that plays albums straight through. Repeat one crossfades back into the start. The second player only exists for a song's last 40 seconds.
 - **macOS integration.** Media keys, Now Playing and Control Center, AirPods controls, a Dock menu, a menu bar player, a floating mini player, a sleep timer and playback speed.
 - **Customisation.**
   - Light/dark appearance, any accent colour, and a Liquid Glass / Frosted / Solid look with adjustable transparency.

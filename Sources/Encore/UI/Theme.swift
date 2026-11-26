@@ -138,13 +138,15 @@ struct AmbientBackground: View {
     /// 0…1: how strongly the content is dimmed for legibility (nil = user setting).
     var dim: Double? = nil
     var parallax: CGFloat = 1
+    /// Multiplies the motion (the artwork view drifts a little livelier).
+    var energy: Double = 1
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var prefs = Prefs.shared
     @State private var image: CGImage?
 
     var body: some View {
         AmbientLayerRepresentable(image: image, dim: dim ?? prefs.backgroundDim, parallax: parallax, dark: scheme == .dark,
-                                  motion: prefs.animatedBackground ? prefs.backgroundMotion : 0,
+                                  motion: prefs.animatedBackground ? prefs.backgroundMotion * energy : 0,
                                   followsCursor: prefs.followCursor)
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -490,14 +492,20 @@ struct PillPicker<Value: Hashable>: View {
     var compact = false
     /// Sitting on a glass capsule already: no extra track fill (avoids a double edge).
     var onGlass = false
+    /// Icons only (the titles become tooltips and VoiceOver labels).
+    var iconOnly = false
+    var tipEdge: VerticalEdge = .top
     @Namespace private var ns
     @State private var hovered: Value?
 
-    init(selection: Binding<Value>, options: [(Value, String, String?)], compact: Bool = false, onGlass: Bool = false) {
+    init(selection: Binding<Value>, options: [(Value, String, String?)], compact: Bool = false, onGlass: Bool = false,
+         iconOnly: Bool = false, tipEdge: VerticalEdge = .top) {
         self._selection = selection
         self.options = options.map { (value: $0.0, title: $0.1, symbol: $0.2) }
         self.compact = compact
         self.onGlass = onGlass
+        self.iconOnly = iconOnly
+        self.tipEdge = tipEdge
     }
 
     var body: some View {
@@ -506,15 +514,20 @@ struct PillPicker<Value: Hashable>: View {
         HStack(spacing: 0) {
             ForEach(options, id: \.value) { opt in
                 let on = opt.value == selection
-                Button {
+                let button = Button {
                     withAnimation(.spring(duration: 0.32, bounce: 0.22)) { selection = opt.value }
                 } label: {
                     HStack(spacing: 5) {
-                        if let s = opt.symbol { Image(systemName: s).font(.system(size: compact ? 10 : 11, weight: .semibold)) }
-                        Text(opt.title).lineLimit(1)
+                        if let s = opt.symbol {
+                            // The chosen option's icon is filled, as elsewhere in the app.
+                            Image(systemName: s)
+                                .font(.system(size: iconOnly ? 14 : (compact ? 10 : 11), weight: iconOnly ? .medium : .semibold))
+                                .symbolVariant(on ? .fill : .none)
+                        }
+                        if !iconOnly { Text(opt.title).lineLimit(1) }
                     }
                     .font(.system(size: compact ? 11 : 12, weight: .semibold))
-                    .padding(.horizontal, compact ? 11 : 14)
+                    .padding(.horizontal, iconOnly ? 12 : (compact ? 11 : 14))
                     .padding(.vertical, compact ? 5 : 7)
                     .foregroundStyle(on ? Color.primary : Color.secondary)
                     .background {
@@ -531,6 +544,8 @@ struct PillPicker<Value: Hashable>: View {
                     .onHover { h in withAnimation(.easeOut(duration: 0.12)) { if h { hovered = opt.value } else if hovered == opt.value { hovered = nil } } }
                 }
                 .buttonStyle(PillOptionStyle())
+                .accessibilityLabel(opt.title)
+                if iconOnly { button.hoverTip(opt.title, edge: tipEdge) } else { button }
             }
         }
         .padding(onGlass ? 2 : 3)

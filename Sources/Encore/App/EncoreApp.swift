@@ -64,11 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             WebHost.shared.park()
             WebHost.shared.watchScreens()
+            WebHost.shared.watchPages()
             MenuBarActivation.start()
             AppDelegate.dropAutomaticSearchFocus()
             ScrollActivity.start()
             WebBridge.shared.start()
             NowPlayingService.shared.start()
+            LockScreenArt.shared.start()
             AppIcon.start()
             Task { await AppModel.shared.refreshAccount() }
         }
@@ -95,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (video mode) never counts; the sign-in page does.
     static func isTyping(in window: NSWindow?) -> Bool {
         guard let r = window?.firstResponder else { return false }
-        if let v = r as? NSView, v === WebBridge.shared.webView || v.isDescendant(of: WebBridge.shared.webView) { return false }
+        if let v = r as? NSView, WebBridge.shared.allWebViews.contains(where: { v === $0 || v.isDescendant(of: $0) }) { return false }
         if r is WKWebView { return true }
         // Any text field with the cursor in it. (The automatic focus macOS gives
         // the search field is removed in dropAutomaticSearchFocus, so a focused
@@ -219,26 +221,51 @@ final class WebHost {
     }
 
     func park() {
-        let web = WebBridge.shared.webView
-        let wasPlaying = PlayerController.shared.isPlaying && web.superview != nil
+        let wasPlaying = PlayerController.shared.isPlaying && WebBridge.shared.webView.superview != nil
         defer { keepPlaying(wasPlaying) }
-        web.removeFromSuperview()
-        web.frame = parking.contentView?.bounds ?? .zero
-        web.autoresizingMask = [.width, .height]
-        parking.contentView?.addSubview(web)
+        if let host = parking.contentView { move(WebBridge.shared.allWebViews, into: host) }
         parking.orderFrontRegardless()
         parking.setFrameOrigin(NSPoint(x: -20000, y: -20000))
     }
 
     func adopt(into view: NSView) {
-        let web = WebBridge.shared.webView
-        guard web.superview !== view else { return }
+        guard WebBridge.shared.webView.superview !== view else { pagesChanged(); return }
         let wasPlaying = PlayerController.shared.isPlaying
         defer { keepPlaying(wasPlaying) }
-        web.removeFromSuperview()
-        web.frame = view.bounds
-        web.autoresizingMask = [.width, .height]
-        view.addSubview(web)
+        move(WebBridge.shared.allWebViews, into: view)
+    }
+
+    /// Both player pages (two while Crossfade is on) live in the same place, the one
+    /// that isn't playing fully transparent: switching between them never moves a
+    /// page between windows (which can make WebKit pause it).
+    private func move(_ views: [WKWebView], into host: NSView) {
+        for web in views where web.superview !== host {
+            web.removeFromSuperview()
+            web.frame = host.bounds
+            web.autoresizingMask = [.width, .height]
+            host.addSubview(web, positioned: .below, relativeTo: nil)
+        }
+        showPlayingPage()
+    }
+
+    private func showPlayingPage() {
+        let playing = WebBridge.shared.webView
+        for web in WebBridge.shared.allWebViews { web.alphaValue = web === playing ? 1 : 0 }
+    }
+
+    /// A page was added or removed, or the other page became the player.
+    private func pagesChanged() {
+        let host = WebBridge.shared.webView.superview ?? parking.contentView
+        if let host { move(WebBridge.shared.allWebViews, into: host) }
+    }
+
+    /// Follows the player pages as Crossfade adds, removes and swaps them.
+    func watchPages() {
+        for name in [Notification.Name.playerPagesChanged, .playerPageSwapped] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { WebHost.shared.pagesChanged() }
+            })
+        }
     }
 }
 

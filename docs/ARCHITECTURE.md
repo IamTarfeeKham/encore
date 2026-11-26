@@ -23,7 +23,7 @@ There is no equaliser: WebKit hands Web Audio pure silence for YouTube's (Media 
 
 The view is kept alive in an off-screen parking window, or mounted in the main window for video.
 
-`PlayerController` owns the queue: radio/autoplay, shuffle, repeat, sleep timer, a persisted queue and counterpart video switching. It also runs crossfade: a fade-out over the end of a song and a fade-in for the next (one player, so they don't overlap), with Smart rules (same album plays straight through, at most a tenth of the song, short fade-ins). It also runs the SponsorBlock check and records play stats. `PlaybackClock` extrapolates playback time between polls, which keeps lyrics smooth.
+`PlayerController` owns the queue: radio/autoplay, shuffle, repeat, sleep timer, a persisted queue and counterpart video switching. It also runs crossfade. `WebBridge` keeps a second, muted player page for a song's last 40 seconds (and closes it again); the next song starts there, the two pages swap roles, and a 30 Hz equal-power volume ramp (driven from Swift, since hidden pages' timers are throttled) fades one out and the other in. Smart rules: same album plays straight through, at most a tenth of the song. It also runs the SponsorBlock check and records play stats. `PlaybackClock` extrapolates playback time between polls, which keeps lyrics smooth.
 
 ## Data (`Core/InnerTube.swift`, `Core/Parser.swift`, `Core/JSON.swift`)
 
@@ -60,7 +60,8 @@ Timing defaults follow Better Lyrics:
 | `Feed.swift` | The endless Home/Explore feed: a SwiftUI scroll view whose rows are prepared ahead while you're not scrolling, released far from view (keeping their exact height), and paused during width animations |
 | `Components.swift` | Cards (fixed size, so carousels never measure them), shelf carousels, track rows, left-packed grids |
 | `PlayerBar.swift` | Player bar, transport, scrubber, volume, crossfade |
-| `NowPlayingView.swift` | Now Playing, the lyrics pane, video host |
+| `NowPlayingView.swift` | Now Playing (Lyrics and Artwork views), the lyrics pane, the breathing cover (Core Animation), video host |
+| `LockScreenArt.swift` | The lock screen card: a clear window placed above the lock screen through a private window-server space (SkyLight, looked up at run time), shown only while the screen is locked and music plays |
 | `QueueAndMini.swift` | Queue inspector, mini player, menu bar player |
 | `SignInAndSettings.swift` | Sign-in web view and all settings pages |
 | `About.swift` | The About window |

@@ -334,6 +334,17 @@ struct SettingsView: View {
                 SettingsToggle("Glow on the word being sung", $prefs.lyricsGlow)
                 SettingsToggle("Blur lines that aren't playing", $prefs.lyricsBlur)
             }
+            SettingsCard("Now Playing view") {
+                SettingsRow("Show", detail: "Lyrics: the cover beside the lyrics, or beside Up Next when a song has none. Artwork: just the cover, big. You can also switch at the top of Now Playing.") {
+                    PillPicker(selection: $prefs.nowPlayingLayout, options: [(.lyrics, "Lyrics", "quote.bubble"), (.artwork, "Artwork", "photo")])
+                }
+                SettingsToggle("Gently animate the artwork view", $prefs.artworkMotion,
+                               detail: "In the Artwork view the cover breathes slowly and the background drifts a little more. Off when Reduce Motion is on.")
+            }
+            SettingsCard("Lock Screen") {
+                SettingsToggle("Show the song on the lock screen", $prefs.lockScreenArtwork,
+                               detail: "While music plays, the cover (moving gently, like the Artwork view) and the song's name appear on your Mac's lock screen, between the clock and the password field. New: it uses a part of macOS that Apple doesn't document, so it may not appear on every macOS version.")
+            }
             SettingsCard("Timing") {
                 SettingsRow("Sync offset") {
                     HStack {
@@ -354,7 +365,7 @@ struct SettingsView: View {
                 SettingsRow("Playback speed") {
                     PillMenu(selection: $player.playbackRate, options: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map { ($0, $0 == 1 ? "Normal" : String(format: "%g×", $0)) })
                 }
-                SettingsRow("Crossfade", detail: "Fades each song out at the end and the next one in. On repeat one, the song dips briefly and loops straight back. Also in the player bar (♪→♪).") {
+                SettingsRow("Crossfade", detail: "The next song starts while this one fades out, so the two blend into each other (repeat one crossfades a song into its own start). A second player runs for the last 40 seconds of each song. Also in the player bar (♪→♪).") {
                     HStack(spacing: 10) {
                         Slider(value: $player.fadeSeconds, in: 0...12, step: 1).frame(width: 160)
                         Text(player.fadeSeconds > 0 ? "\(Int(player.fadeSeconds)) s" : "Off")
@@ -364,7 +375,7 @@ struct SettingsView: View {
                     }
                 }
                 SettingsToggle("Smart crossfade", $player.smartFade,
-                               detail: "Songs from the same album play straight through with no fade, short songs get a shorter fade, and fade-ins stay brief.")
+                               detail: "Songs from the same album run straight into each other, and short songs get a shorter crossfade.")
                     .disabled(player.fadeSeconds == 0)
                 SettingsToggle("Remember queue and position after quitting", $prefs.rememberQueue)
                 SettingsRow("Sleep timer") {

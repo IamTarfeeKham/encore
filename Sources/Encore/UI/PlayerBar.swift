@@ -95,10 +95,19 @@ struct PlayerBar: View {
                 .padding(.leading, compact ? 12 : 20)
             Spacer(minLength: 14)
             HStack(spacing: compact ? 8 : 16) {
-                Button { withAnimation(.spring(duration: 0.45)) { model.showNowPlaying.toggle() } } label: {
-                    Image(systemName: model.showNowPlaying ? "quote.bubble.fill" : "quote.bubble")
+                // Always lands on the lyrics (even from the Artwork view); closes them if showing.
+                let lyricsShown = model.showNowPlaying && prefs.nowPlayingLayout == .lyrics
+                Button {
+                    withAnimation(.spring(duration: 0.45)) {
+                        if lyricsShown { model.showNowPlaying = false } else {
+                            prefs.nowPlayingLayout = .lyrics
+                            model.showNowPlaying = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: lyricsShown ? "quote.bubble.fill" : "quote.bubble")
                 }
-                .foregroundStyle(model.showNowPlaying ? Color.accentColor : .primary)
+                .foregroundStyle(lyricsShown ? Color.accentColor : .primary)
                 .hoverTip("Lyrics")
                 Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: { Image(systemName: "list.bullet") }
                     .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
@@ -540,7 +549,7 @@ private struct FadePopover: View {
             } maximumValueLabel: {
                 Text("12 s").font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            Text("The song fades out over its last seconds and the next one fades in. On repeat one, it dips briefly and loops straight back to the start.")
+            Text("The next song starts while this one fades out, so the two blend into each other. On repeat one, a song crossfades into its own start.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -548,7 +557,7 @@ private struct FadePopover: View {
             Toggle(isOn: $player.smartFade) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Smart").font(.system(size: 13, weight: .semibold))
-                    Text("Songs from the same album play straight through with no fade, short songs get a shorter fade, and fade-ins stay brief.")
+                    Text("Songs from the same album run straight into each other, and short songs get a shorter crossfade.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

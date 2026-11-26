@@ -16,6 +16,9 @@ final class Prefs: ObservableObject {
     }
     enum LyricsStyle: String, CaseIterable, Identifiable { case wipe = "Letter sweep", fade = "Word fade", line = "Whole line"; var id: String { rawValue } }
     enum LyricsAlign: String, CaseIterable, Identifiable { case leading = "Left", center = "Centre"; var id: String { rawValue } }
+    /// What Now Playing shows beside the controls: the cover with the lyrics (or with
+    /// Up Next when a song has none), or just the cover, big.
+    enum NowPlayingLayout: String, CaseIterable, Identifiable { case lyrics = "Lyrics", artwork = "Artwork"; var id: String { rawValue } }
 
     /// Accent colours of popular apps (hex), offered as one-click presets.
     static let popularAccents: [(String, String)] = [
@@ -43,6 +46,12 @@ final class Prefs: ObservableObject {
     /// How dark/opaque glass panels are (0 = fully clear, 0.6 = nearly solid).
     @Published var glassTint: Double { didSet { d.set(glassTint, forKey: "glassTint") } }
     @Published var animatedBackground: Bool { didSet { d.set(animatedBackground, forKey: "animatedBackground") } }
+    /// Lyrics (cover beside the lyrics, or beside Up Next) or Artwork (just the cover).
+    @Published var nowPlayingLayout: NowPlayingLayout { didSet { d.set(nowPlayingLayout.rawValue, forKey: "nowPlayingLayout") } }
+    /// While music plays, the cover and song name appear on the Mac's lock screen.
+    @Published var lockScreenArtwork: Bool { didSet { d.set(lockScreenArtwork, forKey: "lockScreenArtwork") } }
+    /// The artwork view moves gently: the cover breathes, the background drifts a little more.
+    @Published var artworkMotion: Bool { didSet { d.set(artworkMotion, forKey: "artworkMotion") } }
     @Published var backgroundMotion: Double { didSet { d.set(backgroundMotion, forKey: "backgroundMotion") } }
     @Published var followCursor: Bool { didSet { d.set(followCursor, forKey: "followCursor") } }
     @Published var backgroundDim: Double { didSet { d.set(backgroundDim, forKey: "backgroundDim") } }
@@ -114,6 +123,10 @@ final class Prefs: ObservableObject {
         hiddenHomeSections = d.stringArray(forKey: "hiddenHomeSections") ?? []
         glassStyle = s("glassStyle", .liquid)
         animatedBackground = b("animatedBackground", true)
+        // Earlier versions had a lyrics on/off button; "off" was this artwork view.
+        nowPlayingLayout = s("nowPlayingLayout", b("showLyrics", true) ? .lyrics : .artwork)
+        artworkMotion = b("artworkMotion", true)
+        lockScreenArtwork = b("lockScreenArtwork", true)
         glassTint = n("glassTint", 0.12)
         backgroundMotion = n("backgroundMotion", 1)
         followCursor = b("followCursor", true)
