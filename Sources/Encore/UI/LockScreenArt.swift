@@ -175,7 +175,8 @@ private struct LockScreenView: View {
                     }
                     card(width: cardWidth)
                 }
-                .padding(.top, expanded ? h * 0.25 : h * 0.43)
+                // Lower down, just above the account and password area (like Canopy).
+                .padding(.top, expanded ? h * 0.25 : h * 0.55)
                 .frame(maxWidth: .infinity)
             }
             .foregroundStyle(.white)
@@ -311,41 +312,52 @@ private struct WaveLine: NSViewRepresentable {
 }
 
 private final class WaveLineView: NSView {
+    /// Clips the wave to the played part; the wave slides inside it.
+    private let played = CALayer()
     private let wave = CAShapeLayer()
-    private let waveMask = CALayer()
     private let rest = CAShapeLayer()
     private let thumb = CALayer()
     private var progress = 0.0, playing = false
-    private let wavelength: CGFloat = 22, amplitude: CGFloat = 3.2
+    private let wavelength: CGFloat = 20, amplitude: CGFloat = 3
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        for l in [wave, rest] { l.fillColor = nil; l.lineCap = .round; l.lineWidth = 3.2 }
+        layer?.masksToBounds = true
+        played.masksToBounds = true
+        played.anchorPoint = .zero
+        wave.fillColor = nil
+        wave.lineCap = .round
+        wave.lineWidth = 3
+        wave.anchorPoint = .zero
+        rest.fillColor = nil
+        rest.lineCap = .round
+        rest.lineWidth = 3
         rest.strokeColor = NSColor.white.withAlphaComponent(0.28).cgColor
-        rest.lineWidth = 2.4
-        waveMask.backgroundColor = NSColor.black.cgColor
-        wave.mask = waveMask
         thumb.cornerRadius = 2
+        played.addSublayer(wave)
         layer?.addSublayer(rest)
-        layer?.addSublayer(wave)
+        layer?.addSublayer(played)
         layer?.addSublayer(thumb)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     override func layout() {
         super.layout()
-        // A wave one wavelength longer than the bar, slid left in a loop.
-        let mid = bounds.midY
+        // The wave is one wavelength longer than the bar and slides left by one
+        // wavelength in a loop, so it looks endless.
+        let h = bounds.height, mid = h / 2
+        let width = bounds.width + wavelength * 2
         let path = CGMutablePath()
-        let steps = Int((bounds.width + wavelength * 2) / 2)
-        for i in 0...steps {
-            let x = CGFloat(i) * 2 - wavelength
-            let y = mid + amplitude * sin(x / wavelength * 2 * .pi)
-            i == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
+        var x: CGFloat = 0
+        path.move(to: CGPoint(x: 0, y: mid))
+        while x <= width {
+            path.addLine(to: CGPoint(x: x, y: mid + amplitude * sin(x / wavelength * 2 * .pi)))
+            x += 1.5
         }
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        wave.frame = bounds
+        wave.bounds = CGRect(x: 0, y: 0, width: width, height: h)
+        wave.position = .zero
         wave.path = path
         rest.frame = bounds
         CATransaction.commit()
@@ -356,49 +368,51 @@ private final class WaveLineView: NSView {
     func update(progress: Double, color: NSColor, playing: Bool) {
         wave.strokeColor = color.cgColor
         thumb.backgroundColor = color.cgColor
-        let wasPlaying = self.playing
+        let changed = self.playing != playing
         self.progress = progress
         self.playing = playing
         apply(animated: true)
-        if wasPlaying != playing { restartFlow() }
+        if changed { restartFlow() }
     }
 
-    /// Played part (wave) up to the thumb, thin line after it.
+    /// Played part (the wave) up to the thumb, a plain line after it.
     private func apply(animated: Bool) {
-        let x = bounds.width * progress
+        let w = bounds.width, mid = bounds.height / 2
+        let x = (w - 4) * progress + 2
         CATransaction.begin()
         CATransaction.setAnimationDuration(animated ? 0.5 : 0)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
-        // The mask sits in the wave layer's own coordinates, which slide; keep it
-        // at the bar's left edge by giving it the bar's frame and clipping by width.
-        waveMask.frame = CGRect(x: 0, y: 0, width: max(0, x - 4), height: bounds.height)
+        played.frame = CGRect(x: 0, y: 0, width: max(0, x - 5), height: bounds.height)
         let p = CGMutablePath()
-        p.move(to: CGPoint(x: min(x + 6, bounds.width), y: bounds.midY))
-        p.addLine(to: CGPoint(x: bounds.width, y: bounds.midY))
+        p.move(to: CGPoint(x: min(x + 5, w - 1.5), y: mid))
+        p.addLine(to: CGPoint(x: w - 1.5, y: mid))
         rest.path = p
-        thumb.frame = CGRect(x: x - 2, y: bounds.midY - 9, width: 4, height: 18)
-        wave.lineWidth = playing ? 3.2 : 2.8
+        thumb.frame = CGRect(x: x - 1.5, y: mid - 7, width: 3, height: 14)
         CATransaction.commit()
     }
 
     /// The wave flows while playing and relaxes into a flat line when paused.
     private func restartFlow() {
-        wave.removeAnimation(forKey: "flow")
-        wave.removeAnimation(forKey: "flatten")
+        wave.removeAllAnimations()
         if playing {
             wave.transform = CATransform3DIdentity
-            let a = CABasicAnimation(keyPath: "sublayerTransform.translation.x")
+            let a = CABasicAnimation(keyPath: "position.x")
             a.fromValue = 0
             a.toValue = -wavelength
-            a.duration = 1.1
+            a.duration = 1.0
             a.repeatCount = .infinity
             wave.add(a, forKey: "flow")
         } else {
-            let flat = CABasicAnimation(keyPath: "transform.scale.y")
-            flat.fromValue = 1; flat.toValue = 0.05
+            let mid = bounds.height / 2
+            // Flatten towards the centre line.
+            var t = CATransform3DMakeTranslation(0, mid, 0)
+            t = CATransform3DScale(t, 1, 0.05, 1)
+            t = CATransform3DTranslate(t, 0, -mid, 0)
+            let flat = CABasicAnimation(keyPath: "transform")
+            flat.fromValue = NSValue(caTransform3D: CATransform3DIdentity)
+            flat.toValue = NSValue(caTransform3D: t)
             flat.duration = 0.4
-            flat.fillMode = .forwards
-            flat.isRemovedOnCompletion = false
+            wave.transform = t
             wave.add(flat, forKey: "flatten")
         }
     }
@@ -455,21 +469,34 @@ private struct LockBackdrop: NSViewRepresentable {
 }
 
 private final class LockBackdropView: NSView {
+    /// Blurred cover filling the screen (shows at the sides).
+    private let fill = CALayer()
+    /// The whole cover, sharp, at full screen height in the middle.
     private let art = CALayer()
+    private let edges = CAGradientLayer()
     private let scrim = CAGradientLayer()
     private var artwork: URL?
     private var moving = true
+    private var aspect: CGFloat = 1
     private var loadTask: Task<Void, Never>?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        art.contentsGravity = .resizeAspectFill
+        fill.contentsGravity = .resizeAspectFill
+        art.contentsGravity = .resizeAspect
         art.minificationFilter = .trilinear
+        // Soft left and right edges, so the sharp cover melts into the blurred sides.
+        edges.startPoint = CGPoint(x: 0, y: 0.5)
+        edges.endPoint = CGPoint(x: 1, y: 0.5)
+        edges.colors = [NSColor.clear.cgColor, NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+        edges.locations = [0, 0.08, 0.92, 1]
+        art.mask = edges
+        layer?.addSublayer(fill)
         layer?.addSublayer(art)
-        scrim.colors = [NSColor.black.withAlphaComponent(0.35).cgColor, NSColor.black.withAlphaComponent(0.1).cgColor,
-                        NSColor.black.withAlphaComponent(0.15).cgColor, NSColor.black.withAlphaComponent(0.5).cgColor]
+        scrim.colors = [NSColor.black.withAlphaComponent(0.32).cgColor, NSColor.black.withAlphaComponent(0.05).cgColor,
+                        NSColor.black.withAlphaComponent(0.1).cgColor, NSColor.black.withAlphaComponent(0.45).cgColor]
         scrim.locations = [0, 0.3, 0.62, 1]
         layer?.addSublayer(scrim)
     }
@@ -478,7 +505,11 @@ private final class LockBackdropView: NSView {
     override func layout() {
         super.layout()
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        art.frame = bounds.insetBy(dx: -bounds.width * 0.06, dy: -bounds.height * 0.06)
+        fill.frame = bounds.insetBy(dx: -bounds.width * 0.08, dy: -bounds.height * 0.08)
+        // Full height, the cover's own width, centred: the whole cover is visible.
+        let h = bounds.height, w = min(bounds.width, h * aspect)
+        art.frame = CGRect(x: (bounds.width - w) / 2, y: 0, width: w, height: h)
+        edges.frame = art.bounds
         scrim.frame = bounds
         CATransaction.commit()
     }
@@ -488,38 +519,43 @@ private final class LockBackdropView: NSView {
         guard artwork != self.artwork else { return }
         self.artwork = artwork
         loadTask?.cancel()
-        guard let artwork else { art.contents = nil; return }
+        guard let artwork else { art.contents = nil; fill.contents = nil; return }
         loadTask = Task { @MainActor [weak self] in
             guard let img = await ImageLoader.shared.cgImage(for: artwork, maxPixel: 1200) else { return }
-            let soft = await Task.detached(priority: .userInitiated) { Self.render(img) }.value
+            let (sharp, soft) = await Task.detached(priority: .userInitiated) {
+                (Self.render(img, blur: 0, brightness: -0.06), Self.render(img, blur: 40, brightness: -0.16))
+            }.value
             guard let self, !Task.isCancelled else { return }
             let swap = CATransition(); swap.type = .fade; swap.duration = 0.6
-            self.art.add(swap, forKey: "swap")
-            self.art.contents = soft
+            self.art.add(swap, forKey: "swap"); self.fill.add(swap, forKey: "swap")
+            self.aspect = CGFloat(img.width) / CGFloat(max(img.height, 1))
+            self.art.contents = sharp
+            self.fill.contents = soft
+            self.needsLayout = true
             self.drift()
         }
     }
 
+    /// Only the blurred sides drift, slowly; the cover itself stays put.
     private func drift() {
-        art.removeAnimation(forKey: "drift")
+        fill.removeAnimation(forKey: "drift")
         guard moving else { return }
         let a = CABasicAnimation(keyPath: "transform")
         a.fromValue = NSValue(caTransform3D: CATransform3DIdentity)
-        a.toValue = NSValue(caTransform3D: CATransform3DTranslate(CATransform3DMakeScale(1.06, 1.06, 1), -20, 12, 0))
-        a.duration = 24
+        a.toValue = NSValue(caTransform3D: CATransform3DRotate(CATransform3DMakeScale(1.08, 1.08, 1), 0.04, 0, 0, 1))
+        a.duration = 26
         a.autoreverses = true
         a.repeatCount = .infinity
         a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         a.isRemovedOnCompletion = false
-        art.add(a, forKey: "drift")
+        fill.add(a, forKey: "drift")
     }
 
-    nonisolated private static func render(_ img: CGImage) -> CGImage? {
+    nonisolated private static func render(_ img: CGImage, blur: Double, brightness: Double) -> CGImage? {
         let extent = CGRect(x: 0, y: 0, width: img.width, height: img.height)
-        let ci = CIImage(cgImage: img).clampedToExtent()
-            .applyingGaussianBlur(sigma: 2.5)
-            .applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: -0.12, kCIInputSaturationKey: 1.08])
-            .cropped(to: extent)
+        var ci = CIImage(cgImage: img)
+        if blur > 0 { ci = ci.clampedToExtent().applyingGaussianBlur(sigma: blur).cropped(to: extent) }
+        ci = ci.applyingFilter("CIColorControls", parameters: [kCIInputBrightnessKey: brightness, kCIInputSaturationKey: 1.06])
         let ctx = CIContext(options: [.workingFormat: CIFormat.RGBAh, .cacheIntermediates: false])
         return ctx.createCGImage(ci, from: extent, format: .RGBA16,
                                  colorSpace: CGColorSpace(name: CGColorSpace.displayP3) ?? CGColorSpaceCreateDeviceRGB())

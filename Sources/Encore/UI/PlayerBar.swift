@@ -24,11 +24,14 @@ struct PlayerBar: View {
                         .padding(.horizontal, 28)
                     ScrubberBar()
                 }
-                .frame(width: narrow ? max(230, g.size.width * 0.36) : min(460, max(320, g.size.width * 0.34)))
+                // Narrow: the middle takes the spare room (no gap before the right buttons).
+                .frame(minWidth: narrow ? 230 : nil, maxWidth: narrow ? .infinity : nil)
+                .frame(width: narrow ? nil : min(460, max(320, g.size.width * 0.34)))
                 .padding(.horizontal, narrow ? 8 : (compact ? 12 : 18))
                 Separator()
                 right(compact: compact, narrow: narrow)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .frame(maxWidth: narrow ? nil : .infinity, alignment: .trailing)
+                    .fixedSize(horizontal: narrow, vertical: false)
             }
             .padding(.horizontal, 16)
             .frame(height: Self.height)
@@ -103,16 +106,16 @@ struct PlayerBar: View {
 
     private func right(compact: Bool, narrow: Bool) -> some View {
         HStack(spacing: 0) {
-            if narrow {
-                // No room for the slider: a speaker button that opens it.
-                CompactVolumeButton().padding(.leading, 8)
-            } else {
+            if !narrow {
                 VolumeControl()
                     .frame(minWidth: 110, maxWidth: compact ? 150 : 230)
                     .padding(.leading, compact ? 12 : 20)
             }
             Spacer(minLength: narrow ? 8 : 14)
             HStack(spacing: narrow ? 4 : (compact ? 8 : 16)) {
+                // No room for the slider: a speaker button (that opens it) joins the
+                // other buttons, so there's no empty gap.
+                if narrow { CompactVolumeButton() }
                 // Always lands on the lyrics (even from the Artwork view); closes them if showing.
                 let lyricsShown = model.showNowPlaying && prefs.nowPlayingLayout == .lyrics
                 Button {
