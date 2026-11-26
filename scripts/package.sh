@@ -14,8 +14,8 @@ shasum -a 256 "$ZIP"
 # Signature for in-app updates (the app only installs zips signed with this key).
 KEY="$HOME/.config/encore/update-signing-key"
 if [ -f "$KEY" ]; then
-  swift scripts/sign_update.swift "$KEY" "$ZIP" > "$ZIP.sig"
-  echo "Signed $ZIP.sig"
+  swift scripts/sign_update.swift "$KEY" "$ZIP" > "${ZIP%.zip}.sig"
+  echo "Signed ${ZIP%.zip}.sig"
 else
   echo "warning: no update signing key at $KEY; in-app updates won't install this release" >&2
 fi

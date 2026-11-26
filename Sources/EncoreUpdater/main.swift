@@ -24,10 +24,26 @@ func log(_ s: String) {
     else { try? line.write(to: logURL, atomically: true, encoding: .utf8) }
 }
 
+// The request comes as arguments (manual use), or, when the sandboxed app starts
+// us (it can't pass arguments), from the file it leaves in its own data folder.
+let requestFile: URL = {
+    let home = getpwuid(getuid()).flatMap { String(validatingCString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+    return URL(fileURLWithPath: home).appendingPathComponent("Library/Containers/local.ytmusicmac/Data/Library/Caches/EncoreUpdate.json")
+}()
+let fileRequest: [String: Any] = {
+    guard CommandLine.arguments.count <= 1, let d = try? Data(contentsOf: requestFile),
+          let r = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [:] }
+    try? FileManager.default.removeItem(at: requestFile)
+    return r
+}()
+
 func arg(_ name: String) -> String? {
     let a = CommandLine.arguments
-    guard let i = a.firstIndex(of: name), i + 1 < a.count else { return nil }
-    return a[i + 1]
+    if let i = a.firstIndex(of: name), i + 1 < a.count { return a[i + 1] }
+    let key = String(name.dropFirst(2))
+    if let v = fileRequest[key] as? String { return v }
+    if let v = fileRequest[key] as? Int { return String(v) }
+    return nil
 }
 
 @discardableResult
@@ -64,9 +80,14 @@ guard let urlString = arg("--url"), let url = URL(string: urlString), url.scheme
       let signature = arg("--signature").flatMap({ Data(base64Encoded: $0) }),
       let appPath = arg("--app"), appPath.hasSuffix(".app"),
       let pid = arg("--pid").flatMap(Int32.init)
-else { log("bad arguments: \(CommandLine.arguments.dropFirst())"); exit(2) }
+else {
+    log("bad request: \(CommandLine.arguments.dropFirst()) \(fileRequest.keys.sorted())")
+    // Don't leave the app closed if it quit for this.
+    if let app = fileRequest["app"] as? String, app.hasSuffix(".app") { reopen(URL(fileURLWithPath: app)) }
+    exit(2)
+}
 
-let relaunch = CommandLine.arguments.contains("--relaunch")
+let relaunch = CommandLine.arguments.contains("--relaunch") || (fileRequest["relaunch"] as? Bool ?? false)
 let target = URL(fileURLWithPath: appPath).standardizedFileURL
 guard bundleID(of: target) == appBundleID else { fail("\(target.path) isn't Encore", reopen: nil) }
 let reopenOnFail: URL? = relaunch ? target : nil

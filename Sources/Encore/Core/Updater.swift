@@ -106,7 +106,9 @@ final class Updater: ObservableObject {
             return Release(version: version,
                            notes: Self.plainText(field("content", in: entry) ?? ""),
                            published: field("updated", in: entry).flatMap(iso.date(from:)) ?? Date(),
-                           zip: URL(string: base)!, signature: URL(string: base + ".sig")!,
+                           // ".sig" next to the zip (1.0.18's updater looked for ".zip.sig" and
+                           // can't hand over; without that file it stops safely instead).
+                           zip: URL(string: base)!, signature: URL(string: base.replacingOccurrences(of: ".zip", with: ".sig"))!,
                            page: URL(string: "https://github.com/\(Self.repo)/releases/tag/\(tag)")!)
         }
     }
@@ -184,11 +186,16 @@ final class Updater: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(for: req)
                 let sig = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard Data(base64Encoded: sig) != nil else { throw APIError.message("The release has no valid signature.") }
-                var args = ["--url", release.zip.absoluteString, "--signature", sig,
-                            "--app", Bundle.main.bundleURL.path, "--pid", String(ProcessInfo.processInfo.processIdentifier)]
-                if relaunch { args.append("--relaunch") }
+                // A sandboxed app can't pass launch arguments, so the request goes in a
+                // small file in this app's own data folder, which the helper reads.
+                let request: [String: Any] = ["url": release.zip.absoluteString, "signature": sig,
+                                              "app": Bundle.main.bundleURL.path,
+                                              "pid": Int(ProcessInfo.processInfo.processIdentifier),
+                                              "relaunch": relaunch]
+                let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+                try JSONSerialization.data(withJSONObject: request).write(to: caches.appendingPathComponent("EncoreUpdate.json"), options: .atomic)
                 let config = NSWorkspace.OpenConfiguration()
-                config.arguments = args
                 config.activates = false
                 config.createsNewApplicationInstance = true
                 _ = try await NSWorkspace.shared.openApplication(at: helperURL, configuration: config)
