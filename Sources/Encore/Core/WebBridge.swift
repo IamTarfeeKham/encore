@@ -444,9 +444,9 @@ final class WebBridge: NSObject, ObservableObject {
         if url.scheme == "about" || url.scheme == "blob" || url.scheme == "data" { return .allow }
         guard url.scheme == "https", let host = url.host else { return .cancel }
         if navigationAction.targetFrame?.isMainFrame == false { return .allow }
-        if host.hasSuffix("youtube.com") || host.hasSuffix("google.com") || host.hasSuffix("gstatic.com") {
-            return .allow
-        }
+        // Exact domains or real subdomains only ("evilyoutube.com" must not pass).
+        let trusted = ["youtube.com", "google.com", "gstatic.com"]
+        if trusted.contains(where: { host == $0 || host.hasSuffix("." + $0) }) { return .allow }
         return .cancel
     }
 }
@@ -542,6 +542,9 @@ private final class WeakHandler: NSObject, WKScriptMessageHandler {
     weak var page: PlayerPage?
     init(_ p: PlayerPage) { page = p }
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
+        // Only YouTube Music's own page may talk to the app.
+        guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == "https",
+              message.frameInfo.securityOrigin.host == "music.youtube.com" else { return }
         let body = message.body
         Task { @MainActor in self.page?.received(body) }
     }

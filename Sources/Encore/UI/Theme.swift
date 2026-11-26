@@ -11,6 +11,8 @@ struct GlassPanel: ViewModifier {
     var interactive = false
     /// Bars that content scrolls under use the denser "regular" glass for legibility.
     var dense = false
+    /// The sidebar and player bar: frosted or clear glass, per Settings.
+    var bar = false
     @ObservedObject private var prefs = Prefs.shared
 
     func body(content: Content) -> some View {
@@ -25,7 +27,14 @@ struct GlassPanel: ViewModifier {
                 .background((tint ?? .clear), in: shape)
                 .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.6))
         } else if #available(macOS 26.0, *) {
-            content.glassEffect(glass, in: .rect(cornerRadius: radius))
+            if bar && prefs.barSurface == .frosted {
+                // Frosted under the glass: what's behind is blurred, not readable.
+                content
+                    .background(.thinMaterial, in: shape)
+                    .glassEffect(glass, in: .rect(cornerRadius: radius))
+            } else {
+                content.glassEffect(glass, in: .rect(cornerRadius: radius))
+            }
         } else {
             content
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
@@ -43,7 +52,9 @@ struct GlassPanel: ViewModifier {
         // Always the clear (lensing) variant, like Apple Music's floating bars; the
         // transparency setting controls how much tint sits in the glass everywhere.
         var g = Glass.clear
-        g = g.tint(Color.black.opacity(min(0.85, prefs.glassTint + (dense ? 0.14 : 0) + (tint == nil ? 0 : 0.04))))
+        // Clear Liquid Glass bars get a lighter tint, so they stay see-through.
+        let clearBar = bar && prefs.barSurface == .liquid
+        g = g.tint(Color.black.opacity(min(0.85, prefs.glassTint * (clearBar ? 0.6 : 1) + (dense && !clearBar ? 0.14 : 0) + (tint == nil ? 0 : 0.04))))
         if interactive { g = g.interactive() }
         return g
     }
@@ -60,8 +71,8 @@ extension View {
                                                        startPoint: .top, endPoint: .bottom), lineWidth: 0.6))
     }
 
-    func glassPanel(_ radius: CGFloat = 18, tint: Color? = nil, interactive: Bool = false, dense: Bool = false) -> some View {
-        modifier(GlassPanel(radius: radius, tint: tint, interactive: interactive, dense: dense))
+    func glassPanel(_ radius: CGFloat = 18, tint: Color? = nil, interactive: Bool = false, dense: Bool = false, bar: Bool = false) -> some View {
+        modifier(GlassPanel(radius: radius, tint: tint, interactive: interactive, dense: dense, bar: bar))
     }
 
     /// Frosted-glass panel for lists that float over busy content (the queue): a
@@ -146,6 +157,7 @@ struct AmbientBackground: View {
 
     var body: some View {
         AmbientLayerRepresentable(image: image, dim: dim ?? prefs.backgroundDim, parallax: parallax, dark: scheme == .dark,
+                                  accent: NSColor(prefs.accentColor),
                                   motion: prefs.animatedBackground ? prefs.backgroundMotion * energy : 0,
                                   followsCursor: prefs.followCursor)
             .ignoresSafeArea()
@@ -162,11 +174,13 @@ private struct AmbientLayerRepresentable: NSViewRepresentable {
     let dim: Double
     let parallax: CGFloat
     let dark: Bool
+    let accent: NSColor
     let motion: Double
     let followsCursor: Bool
 
     func makeNSView(context: Context) -> AmbientLayerView { AmbientLayerView() }
     func updateNSView(_ v: AmbientLayerView, context: Context) {
+        v.setFallback(accent: accent, dark: dark)
         v.parallax = parallax
         v.motion = motion
         v.followsCursor = followsCursor
@@ -217,7 +231,34 @@ final class AmbientLayerView: NSView {
         root.backgroundColor = dark ? NSColor.black.cgColor : NSColor(white: 0.93, alpha: 1).cgColor
         veil.backgroundColor = dark ? NSColor.black.withAlphaComponent(dim).cgColor
                                     : NSColor.white.withAlphaComponent(dim + 0.12).cgColor
-        fallback.opacity = dark ? 1 : 0.35
+        fallback.opacity = 1
+        CATransaction.commit()
+    }
+
+    private var fallbackKey = ""
+
+    /// With nothing playing: a background that suits the accent colour. A deep,
+    /// muted shade of the accent flowing into a neighbouring hue (so any accent
+    /// gets a matching mood); grey accents get a neutral slate; light mode gets
+    /// soft tints instead.
+    func setFallback(accent: NSColor, dark: Bool) {
+        guard let c = accent.usingColorSpace(.deviceRGB) else { return }
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        let key = String(format: "%.3f-%.3f-%d", h, s, dark ? 1 : 0)
+        guard key != fallbackKey else { return }
+        fallbackKey = key
+        let grey = s < 0.15
+        func tone(_ hue: CGFloat, _ sat: CGFloat, _ bri: CGFloat) -> CGColor {
+            NSColor(hue: (hue + 1).truncatingRemainder(dividingBy: 1), saturation: grey ? 0.08 : sat,
+                    brightness: bri, alpha: 1).cgColor
+        }
+        let colors: [CGColor] = dark
+            ? [tone(h, min(0.75, s * 0.8), 0.42), tone(h + 0.07, min(0.6, s * 0.65), 0.25), tone(h - 0.05, min(0.5, s * 0.5), 0.12)]
+            : [tone(h, min(0.28, s * 0.3), 0.97), tone(h + 0.07, min(0.2, s * 0.22), 0.92), tone(h - 0.05, min(0.14, s * 0.16), 0.88)]
+        CATransaction.begin(); CATransaction.setAnimationDuration(0.6)
+        fallback.colors = colors
+        fallback.locations = [0, 0.55, 1]
         CATransaction.commit()
     }
 

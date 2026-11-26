@@ -130,6 +130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         MenuBarActivation.reopenedAt = Date()
         WindowOpener.showMain()
+        // A Dock click always wins: bring the window forward again once activation
+        // has settled (in case anything sent it back meanwhile).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { WindowOpener.showMain() }
         return false
     }
 
@@ -454,6 +457,7 @@ enum MenuBarActivation {
                 && w.level.rawValue > NSWindow.Level.normal.rawValue
                 && !cls.contains("StatusBar") && w.frame.height > 120
                 && w !== WebHost.shared.parkingWindow
+                && w.title != "Mini Player"   // frameless and floating too, but not the dropdown
         }
     }
 

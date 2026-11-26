@@ -29,6 +29,7 @@ struct SignInPrompt: View {
 struct SignInView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) var dismiss
+    @State private var finishing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,16 +40,37 @@ struct SignInView: View {
             }
             .padding(12)
             Divider()
-            SignInWebView {
-                dismiss()
-                WebBridge.shared.reload()
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    await model.refreshAccount()
+            SignInWebView { finish() }
+                .overlay {
+                    if finishing {
+                        VStack(spacing: 12) {
+                            ProgressView().controlSize(.large)
+                            Text("Finishing sign-in…").font(.system(size: 14, weight: .medium))
+                            Text("Loading your library").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(.regularMaterial)
+                        .transition(.opacity)
+                    }
                 }
-            }
         }
         .frame(width: 520, height: 680)
+    }
+
+    /// Signed in: reload the player with the new session, wait until the account
+    /// is really loaded (not a fixed pause), then close and say who's signed in.
+    private func finish() {
+        withAnimation(.easeOut(duration: 0.2)) { finishing = true }
+        WebBridge.shared.reload()
+        Task {
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                await model.refreshAccount()
+                if model.account != nil { break }
+            }
+            dismiss()
+            if let name = model.account?.name { model.flash("Signed in as \(name)") }
+        }
     }
 }
 
@@ -175,7 +197,10 @@ struct SignInWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            guard let url = action.request.url, let host = url.host else { decisionHandler(.allow); return }
+            guard let url = action.request.url else { decisionHandler(.cancel); return }
+            // Blank and in-memory pages are fine; everything else must be secure.
+            if ["about", "blob", "data"].contains(url.scheme ?? "") { decisionHandler(.allow); return }
+            guard url.scheme == "https", let host = url.host else { decisionHandler(.cancel); return }
             if !SignInWebView.isAllowedHost(host) {
                 if action.targetFrame?.isMainFrame != false { NSWorkspace.shared.open(url) }
                 decisionHandler(.cancel); return
@@ -263,6 +288,11 @@ struct SettingsView: View {
             SettingsCard("Look") {
                 SettingsRow("Appearance") { PillPicker(selection: $prefs.appearance, options: [(.system, "System", "circle.lefthalf.filled"), (.dark, "Dark", "moon.fill"), (.light, "Light", "sun.max.fill")]) }
                 SettingsRow("Panels") { PillPicker(selection: $prefs.glassStyle, options: Prefs.GlassStyle.allCases.map { ($0, $0.rawValue, nil) }) }
+                if prefs.glassStyle == .liquid {
+                    SettingsRow("Sidebar and player bar", detail: "Frosted blurs what's behind them; Liquid Glass keeps them clear and see-through.") {
+                        PillPicker(selection: $prefs.barSurface, options: Prefs.BarSurface.allCases.map { ($0, $0.rawValue, nil) })
+                    }
+                }
                 SettingsRow("Glass transparency", detail: "How see-through every glass surface in the app is: sidebar, player bar, queue, Now Playing controls and menus.") {
                     Slider(value: Binding(get: { 0.6 - prefs.glassTint }, set: { prefs.glassTint = 0.6 - $0 }), in: 0...0.6) { EmptyView() }
                         minimumValueLabel: { Text("Solid") } maximumValueLabel: { Text("Clear") }

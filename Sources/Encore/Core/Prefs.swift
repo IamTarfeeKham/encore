@@ -24,6 +24,8 @@ final class Prefs: ObservableObject {
              twoVersions = "Every 2 versions", threeVersions = "Every 3 versions"
         var id: String { rawValue }
     }
+    /// How the sidebar and player bar look with Liquid Glass panels.
+    enum BarSurface: String, CaseIterable, Identifiable { case frosted = "Frosted", liquid = "Liquid Glass"; var id: String { rawValue } }
     enum NowPlayingLayout: String, CaseIterable, Identifiable { case lyrics = "Lyrics", artwork = "Artwork"; var id: String { rawValue } }
 
     /// Accent colours of popular apps (hex), offered as one-click presets.
@@ -50,6 +52,7 @@ final class Prefs: ObservableObject {
     @Published var hiddenHomeSections: [String] { didSet { d.set(hiddenHomeSections, forKey: "hiddenHomeSections") } }
     @Published var glassStyle: GlassStyle { didSet { d.set(glassStyle.rawValue, forKey: "glassStyle") } }
     /// How dark/opaque glass panels are (0 = fully clear, 0.6 = nearly solid).
+    @Published var barSurface: BarSurface { didSet { d.set(barSurface.rawValue, forKey: "barSurface") } }
     @Published var glassTint: Double { didSet { d.set(glassTint, forKey: "glassTint") } }
     @Published var animatedBackground: Bool { didSet { d.set(animatedBackground, forKey: "animatedBackground") } }
     /// Lyrics (cover beside the lyrics, or beside Up Next) or Artwork (just the cover).
@@ -135,6 +138,7 @@ final class Prefs: ObservableObject {
         customAccentHex = d.string(forKey: "customAccentHex") ?? "#FF4579"
         hiddenHomeSections = d.stringArray(forKey: "hiddenHomeSections") ?? []
         glassStyle = s("glassStyle", .liquid)
+        barSurface = s("barSurface", .frosted)
         animatedBackground = b("animatedBackground", true)
         // Earlier versions had a lyrics on/off button; "off" was this artwork view.
         nowPlayingLayout = s("nowPlayingLayout", b("showLyrics", true) ? .lyrics : .artwork)

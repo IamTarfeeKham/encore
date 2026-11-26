@@ -667,7 +667,7 @@ struct ResizableSidebar: View {
             let height = contentHeight > 0 ? min(g.size.height, max(160, contentHeight)) : g.size.height
             SidebarView()
                 .frame(width: width, height: height)
-                .glassPanel(20)
+                .glassPanel(20, bar: true)
                 .overlay(alignment: .trailing) {
                     ResizeHandle(cursor: .resizeLeftRight)
                         .frame(width: 18)

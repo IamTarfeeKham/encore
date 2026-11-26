@@ -48,9 +48,7 @@ struct PlayerBar: View {
                 .onTapGesture {}
                 .onHover { _ in }
         }
-        // Frosted under the glass, so songs scrolling behind are blurred, not readable.
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .glassPanel(22, dense: true)
+        .glassPanel(22, dense: true, bar: true)
         .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
     }
 
