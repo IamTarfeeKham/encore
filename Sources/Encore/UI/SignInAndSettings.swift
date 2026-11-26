@@ -36,9 +36,22 @@ struct SignInView: View {
             HStack {
                 Text("Sign in with Google").font(.headline)
                 Spacer()
+                Button { Self.openPasswords() } label: { Label("Passwords", systemImage: "key.fill") }
+                    .help("Open the Passwords app to copy your Google password")
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             .padding(12)
+            // Apple only allows passkeys and Passwords AutoFill for a site inside the
+            // site's own apps and in web browsers, so Google's passkey prompt can't work
+            // here; the page is told passkeys aren't available, and Google offers your
+            // password or a prompt on your phone instead.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "info.circle").foregroundStyle(.secondary)
+                Text("Use your password or the prompt on your phone. Passkeys and Passwords AutoFill only work in web browsers; the Passwords button opens the app so you can copy your password.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 12).padding(.bottom, 10)
             Divider()
             SignInWebView { finish() }
                 .overlay {
@@ -55,6 +68,15 @@ struct SignInView: View {
                 }
         }
         .frame(width: 520, height: 680)
+    }
+
+    /// Opens Apple's Passwords app (macOS 15+), or Passwords in System Settings before that.
+    static func openPasswords() {
+        if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Passwords") {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+        } else if let url = URL(string: "x-apple.systempreferences:com.apple.Passwords-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// Signed in: reload the player with the new session, wait until the account
@@ -105,6 +127,16 @@ struct SignInWebView: NSViewRepresentable {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Passkeys can't work in an app's web view for google.com (Apple allows them
+        // only in browsers and in a site's own apps), so Google's passkey step would
+        // just fail ("Something went wrong"). Report WebAuthn as unavailable so Google
+        // goes straight to the password or the phone prompt.
+        config.userContentController.addUserScript(WKUserScript(source: """
+            (() => { try {
+              Object.defineProperty(window, 'PublicKeyCredential', { value: undefined, configurable: true });
+              if (navigator.credentials) Object.defineProperty(Navigator.prototype, 'credentials', { get: () => undefined, configurable: true });
+            } catch (e) {} })();
+            """, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let web = WKWebView(frame: .zero, configuration: config)
         web.customUserAgent = WebBridge.userAgent
         web.navigationDelegate = context.coordinator
