@@ -265,6 +265,15 @@ struct SidebarView: View {
                         Color.clear.preference(key: SidebarContentHeight.self, value: g.size.height + SidebarView.footerHeight)
                     })
                 }
+                // In a short window the list scrolls; fade it out above the Customise bar
+                // instead of running underneath it.
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: SidebarView.footerHeight + 6)
+                    }
+                }
                 .safeAreaInset(edge: .bottom) {
                     HStack {
                         Button { model.editingSidebar = true } label: {

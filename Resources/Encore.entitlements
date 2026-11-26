@@ -6,5 +6,10 @@
   <key>com.apple.security.app-sandbox</key><true/>
   <!-- Outgoing HTTPS only (YouTube Music, Google sign-in, artwork, LRCLIB). No incoming connections. -->
   <key>com.apple.security.network.client</key><true/>
+  <!-- Read audio files you choose (or drop on the window) to upload them to YouTube Music. -->
+  <key>com.apple.security.files.user-selected.read-only</key><true/>
+  <!-- The one folder the desktop widgets read: what's playing and its cover. -->
+  <key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+  <array><string>/Library/Application Support/Encore Widget/</string></array>
 </dict>
 </plist>

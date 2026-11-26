@@ -36,6 +36,53 @@ plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP/Contents/Info.plis
 if [ -n "${BUNDLE_ID:-}" ]; then plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"; fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# The updater helper (not sandboxed; it only ever replaces this app with a release
+# zip signed with the release key). Signed first, then the app around it.
+HELPER="$APP/Contents/Helpers/Encore Updater.app"
+mkdir -p "$HELPER/Contents/MacOS"
+cp "$(dirname "$BIN")/EncoreUpdater" "$HELPER/Contents/MacOS/EncoreUpdater"
+cat > "$HELPER/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>local.ytmusicmac.updater</string>
+  <key>CFBundleName</key><string>Encore Updater</string>
+  <key>CFBundleExecutable</key><string>EncoreUpdater</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+</dict></plist>
+PLIST
+codesign --force --sign - --timestamp=none --options runtime "$HELPER"
+
+# Desktop widgets (a WidgetKit extension).
+APPEX="$APP/Contents/PlugIns/EncoreWidgets.appex"
+mkdir -p "$APPEX/Contents/MacOS"
+cp "$(dirname "$BIN")/EncoreWidgets" "$APPEX/Contents/MacOS/EncoreWidgets"
+APP_VERSION="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
+APP_BUILD="$(plutil -extract CFBundleVersion raw Resources/Info.plist)"
+APP_ID="${BUNDLE_ID:-$(plutil -extract CFBundleIdentifier raw Resources/Info.plist)}"
+cat > "$APPEX/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>$APP_ID.widgets</string>
+  <key>CFBundleName</key><string>$APP_NAME Widgets</string>
+  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+  <key>CFBundleExecutable</key><string>EncoreWidgets</string>
+  <key>CFBundlePackageType</key><string>XPC!</string>
+  <key>CFBundleShortVersionString</key><string>$APP_VERSION</string>
+  <key>CFBundleVersion</key><string>$APP_BUILD</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>NSExtension</key><dict>
+    <key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string>
+  </dict>
+</dict></plist>
+PLIST
+codesign --force --sign - --timestamp=none --options runtime --entitlements Resources/EncoreWidgets.entitlements "$APPEX"
+
 # Ad-hoc signature with the hardened runtime and the sandbox entitlements.
 # (For public releases, sign with a Developer ID and notarize instead — see README.)
 codesign --force --sign - --timestamp=none --options runtime \

@@ -23,15 +23,19 @@
 - **Now Playing.** Full-window player with an artwork-coloured animated background that reacts to your cursor, Song/Video switching (HD video), and an Up Next list.
   - Lyrics view: the cover beside the lyrics, or beside Up Next when a song has none.
   - Artwork view: just the cover, big, breathing slowly (animated by Core Animation, so it costs almost no CPU).
-- **Lock screen.** While music plays, the cover (gently moving) and the song's name appear on the Mac's lock screen, between the clock and the password field. You can turn it off.
+- **Lock screen player.** While music plays, the lock screen fills with the song: a moving background made from the cover, the cover, a progress bar and play controls. Tap the cover to make it big (the cover then fills the background, drifting slowly). The password box stays clear. You can turn it off.
+- **Desktop widgets.** Now Playing (small, medium, large: cover colours, live progress, play controls, Up Next) and Cover (just the artwork).
+- **Uploads.** Your uploaded songs, albums and artists in the Library, and uploading more: drop audio files on the page or choose Upload Music (MP3, M4A, FLAC, OGG, WMA).
 - **Synced lyrics.** Word-by-word karaoke highlighting, using Better Lyrics word timings, LRCLIB line timings, or YouTube Music's own lyrics.
 - **Queue.** Reorder, remove, shuffle, repeat and autoplay ("radio"), plus a play history. Repeat one loops without a gap.
+- **Updates.** Check for Updates in the app menu and in Settings › General. Updates download from GitHub, are checked against the release signing key, replace the old version and reopen. Automatic checks and installs are on by default (right away, after a day or a week, or every 2–3 versions).
 - **Crossfade.** The next song starts on a second player and plays over the end of the current one (Off to 12 seconds), with a Smart mode that plays albums straight through. Repeat one crossfades back into the start. The second player only exists for a song's last 40 seconds.
 - **macOS integration.** Media keys, Now Playing and Control Center, AirPods controls, a Dock menu, a menu bar player, a floating mini player, a sleep timer and playback speed.
 - **Customisation.**
   - Light/dark appearance, any accent colour, and a Liquid Glass / Frosted / Solid look with adjustable transparency.
   - A resizable, reorderable sidebar.
   - Rebindable keyboard shortcuts.
+- **Your own extensions.** Small JavaScript files that react to songs and control the player (skip short tracks, post songs to a webhook, night-time volume…), run in their own engine with a limited API. Add, import, edit and switch them in Settings › Extensions.
 - **Built-in extensions.**
   - SponsorBlock skips non-music sections of music videos.
   - Auto-skip for songs you've disliked.

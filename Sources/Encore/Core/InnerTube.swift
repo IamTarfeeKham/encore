@@ -5,9 +5,12 @@ enum APIError: LocalizedError {
     case http(Int, String)
     case notSignedIn
     case parse(String)
+    /// A plain explanation, shown as is.
+    case message(String)
 
     var errorDescription: String? {
         switch self {
+        case .message(let m): return m
         case .http(let c, let m): return "YouTube Music returned an error (\(c)). \(m)"
         case .notSignedIn: return "You're not signed in to YouTube Music."
         case .parse(let m): return "Couldn't read YouTube Music's response: \(m)"
@@ -147,7 +150,7 @@ final class InnerTube {
 
     enum LibrarySection: String, CaseIterable, Identifiable {
         case playlists = "Playlists", songs = "Songs", albums = "Albums", artists = "Artists",
-             subscriptions = "Subscriptions", podcasts = "Podcasts", history = "History"
+             uploads = "Uploads", subscriptions = "Subscriptions", podcasts = "Podcasts", history = "History"
         var id: String { rawValue }
         var browseId: String {
             switch self {
@@ -155,6 +158,7 @@ final class InnerTube {
             case .songs: return "FEmusic_liked_videos"
             case .albums: return "FEmusic_liked_albums"
             case .artists: return "FEmusic_library_corpus_track_artists"
+            case .uploads: return UploadsTab.songs.browseId
             case .subscriptions: return "FEmusic_library_corpus_artists"
             case .podcasts: return "FEmusic_library_non_music_audio_list"
             case .history: return "FEmusic_history"
@@ -166,10 +170,105 @@ final class InnerTube {
             case .songs: return "music.note"
             case .albums: return "square.stack"
             case .artists: return "music.mic"
+            case .uploads: return "icloud.and.arrow.up"
             case .subscriptions: return "person.crop.circle.badge.checkmark"
             case .podcasts: return "mic"
             case .history: return "clock.arrow.circlepath"
             }
+        }
+    }
+
+    // MARK: Uploads (music the user uploaded to YouTube Music)
+
+    enum UploadsTab: String, CaseIterable, Identifiable {
+        case songs = "Songs", albums = "Albums", artists = "Artists"
+        var id: String { rawValue }
+        var browseId: String {
+            switch self {
+            case .songs: return "FEmusic_library_privately_owned_tracks"
+            case .albums: return "FEmusic_library_privately_owned_releases"
+            case .artists: return "FEmusic_library_privately_owned_artists"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .songs: return "music.note"
+            case .albums: return "square.stack"
+            case .artists: return "music.mic"
+            }
+        }
+    }
+
+    /// Everything in one Uploads tab, following its "more" pages (up to ~5,000 items).
+    func uploads(_ tab: UploadsTab) async throws -> [MediaItem] {
+        let first = try await browse(tab.browseId)
+        var items = Parser.browsePage(first).shelves.flatMap(\.items)
+        var token = first.find("musicShelfRenderer").continuations[0].nextContinuationData.continuation.string
+            ?? first.find("gridRenderer").continuations[0].nextContinuationData.continuation.string
+        var pages = 0
+        while let t = token, pages < 60, !Task.isCancelled {
+            let (more, next) = Parser.listContinuation(try await browseContinuation(t))
+            if more.isEmpty { break }
+            items += more
+            token = next == t ? nil : next
+            pages += 1
+        }
+        return items.filter { $0.browseId != nil || $0.videoId != nil }
+    }
+
+    /// Audio files YouTube Music accepts for upload, and its size limit.
+    static let uploadExtensions: Set<String> = ["mp3", "m4a", "flac", "ogg", "oga", "wma"]
+    static let uploadSizeLimit = 300 * 1024 * 1024
+
+    /// Uploads one audio file to the user's library, the same two-step way
+    /// music.youtube.com does. YouTube then processes it for a few minutes before
+    /// it shows up in Uploads.
+    func upload(_ file: URL) async throws {
+        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        guard Self.uploadExtensions.contains(file.pathExtension.lowercased()) else {
+            throw APIError.message("YouTube Music only accepts MP3, M4A, FLAC, OGG and WMA files.")
+        }
+        guard size > 0, size <= Self.uploadSizeLimit else {
+            throw APIError.message("Files must be smaller than 300 MB.")
+        }
+        var start = URLRequest(url: URL(string: "https://upload.youtube.com/upload/usermusic/http?authuser=0")!)
+        start.httpMethod = "POST"
+        await authorize(&start)
+        start.setValue("application/x-www-form-urlencoded;charset=utf-8", forHTTPHeaderField: "Content-Type")
+        start.setValue("start", forHTTPHeaderField: "X-Goog-Upload-Command")
+        start.setValue(String(size), forHTTPHeaderField: "X-Goog-Upload-Header-Content-Length")
+        start.setValue("resumable", forHTTPHeaderField: "X-Goog-Upload-Protocol")
+        var allowed = CharacterSet.urlQueryAllowed; allowed.remove(charactersIn: "&=+")
+        let name = file.lastPathComponent.addingPercentEncoding(withAllowedCharacters: allowed) ?? "upload"
+        start.httpBody = Data("filename=\(name)".utf8)
+        let (_, startResponse) = try await session.data(for: start)
+        let started = startResponse as? HTTPURLResponse
+        guard let target = started?.value(forHTTPHeaderField: "X-Goog-Upload-URL").flatMap(URL.init(string:)) else {
+            throw APIError.message("YouTube Music didn't accept the upload (\(started?.statusCode ?? 0)). Check that you're signed in.")
+        }
+        var send = URLRequest(url: target)
+        send.httpMethod = "POST"
+        await authorize(&send)
+        send.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
+        send.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
+        let (_, sent) = try await session.upload(for: send, fromFile: file)
+        let code = (sent as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else { throw APIError.message("The upload didn't finish (\(code)).") }
+    }
+
+    /// Signs a request as the signed-in user (cookies and SAPISIDHASH), like `post`.
+    private func authorize(_ req: inout URLRequest) async {
+        req.setValue(WebBridge.origin, forHTTPHeaderField: "Origin")
+        req.setValue(WebBridge.origin + "/", forHTTPHeaderField: "Referer")
+        req.setValue(WebBridge.userAgent, forHTTPHeaderField: "User-Agent")
+        req.setValue("0", forHTTPHeaderField: "X-Goog-AuthUser")
+        let cookies = await bridge.cookies()
+        var byName: [String: HTTPCookie] = [:]
+        for c in cookies where byName[c.name] == nil || c.domain == ".youtube.com" { byName[c.name] = c }
+        guard !byName.isEmpty else { return }
+        req.setValue(byName.values.map { "\($0.name)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+        if let sapisid = byName["SAPISID"]?.value ?? byName["__Secure-3PAPISID"]?.value {
+            req.setValue(Self.sapisidHash(sapisid), forHTTPHeaderField: "Authorization")
         }
     }
 

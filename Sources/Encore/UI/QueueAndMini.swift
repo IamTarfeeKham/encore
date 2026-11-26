@@ -129,15 +129,19 @@ struct QueueRow: View {
 /// title, progress, transport and like — nothing else.
 struct MiniPlayerView: View {
     @EnvironmentObject var player: PlayerController
+    @ObservedObject private var prefs = Prefs.shared
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
 
     var body: some View {
         ZStack {
-            AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.38, parallax: 0.4)
+            AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.34, parallax: 0.4, energy: 1.4)
             VStack(spacing: 14) {
-                Artwork(url: player.current?.largeArtwork, cornerRadius: 16, size: 248)
-                    .frame(width: 248, height: 248)
-                    .shadow(color: .black.opacity(0.45), radius: 22, y: 12)
+                // The same breathing cover as the Artwork view (Core Animation, nearly free).
+                TiltingArtwork(url: player.current?.largeArtwork, side: 248,
+                               breathing: player.isPlaying && prefs.artworkMotion && !reduceMotion)
                     .scaleEffect(player.isPlaying ? 1 : 0.94)
                     .animation(.spring(duration: 0.5, bounce: 0.25), value: player.isPlaying)
                     .padding(.top, 30)
@@ -154,7 +158,13 @@ struct MiniPlayerView: View {
                     .buttonStyle(BarIconStyle(size: 13))
                     .hoverTip("Like")
                     TransportControls(size: .regular, showShuffleRepeat: false)
-                    Button { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first { $0.identifier?.rawValue.contains("main") == true }?.makeKeyAndOrderFront(nil) } label: {
+                    Button {
+                        // Back to the main window, straight into Now Playing; the mini player closes.
+                        WindowOpener.open = WindowOpener.open ?? openWindow
+                        WindowOpener.showMain()
+                        withAnimation(.spring(duration: 0.45)) { AppModel.shared.showNowPlaying = true }
+                        dismissWindow(id: "mini")
+                    } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                     }
                     .buttonStyle(BarIconStyle(size: 12))
@@ -224,6 +234,9 @@ struct MenuBarPlayerView: View {
         }
         .padding(16)
         .frame(width: 320)
+        // Takes on the cover's colours, like the app's background (dark, so text stays readable).
+        .background(AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.42, parallax: 0, energy: 1.2))
+        .environment(\.colorScheme, .dark)
     }
 }
 

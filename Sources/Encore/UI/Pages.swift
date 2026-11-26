@@ -650,6 +650,10 @@ struct LibraryView: View {
     private var player: PlayerController { .shared }
 
     var body: some View {
+        if section == .uploads { UploadsView() } else { libraryPage }
+    }
+
+    private var libraryPage: some View {
         AsyncPage(id: section.rawValue, load: { try await InnerTube.shared.library(section) }) { page, _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {

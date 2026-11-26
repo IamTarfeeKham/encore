@@ -13,8 +13,10 @@ struct PlayerBar: View {
         // separated by hairlines so each reads as its own group.
         GeometryReader { g in
             let compact = g.size.width < 1200
+            // Half- and quarter-screen windows: fewer buttons, tighter transport.
+            let narrow = g.size.width < 980
             HStack(spacing: 0) {
-                nowPlaying
+                nowPlaying(narrow: narrow)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Separator()
                 VStack(spacing: 2) {
@@ -22,10 +24,10 @@ struct PlayerBar: View {
                         .padding(.horizontal, 28)
                     ScrubberBar()
                 }
-                .frame(width: min(460, max(320, g.size.width * 0.34)))
-                .padding(.horizontal, compact ? 12 : 18)
+                .frame(width: narrow ? max(230, g.size.width * 0.36) : min(460, max(320, g.size.width * 0.34)))
+                .padding(.horizontal, narrow ? 8 : (compact ? 12 : 18))
                 Separator()
-                right(compact: compact)
+                right(compact: compact, narrow: narrow)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(.horizontal, 16)
@@ -40,8 +42,8 @@ struct PlayerBar: View {
         var body: some View { Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1, height: 36) }
     }
 
-    private var nowPlaying: some View {
-        HStack(spacing: 12) {
+    private func nowPlaying(narrow: Bool) -> some View {
+        HStack(spacing: narrow ? 10 : 12) {
             if let t = player.current {
                 Artwork(url: t.thumbnail, cornerRadius: 8, size: 52)
                     .frame(width: 52, height: 52)
@@ -57,6 +59,7 @@ struct PlayerBar: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
+                if !narrow {
                 HStack(spacing: 8) {
                     Button { player.toggleLike() } label: {
                         Image(systemName: player.likeStatus == .like ? "hand.thumbsup.fill" : "hand.thumbsup")
@@ -74,6 +77,7 @@ struct PlayerBar: View {
                 }
                 .buttonStyle(BarIconStyle(size: 14))
                 .padding(.trailing, 18)
+                }
             } else {
                 RoundedRectangle(cornerRadius: 8).fill(.quaternary).frame(width: 52, height: 52)
                     .overlay(Image(systemName: "music.note").foregroundStyle(.tertiary))
@@ -88,13 +92,18 @@ struct PlayerBar: View {
                          videoId: t.videoId, artists: t.artists, album: t.album, duration: t.duration)
     }
 
-    private func right(compact: Bool) -> some View {
+    private func right(compact: Bool, narrow: Bool) -> some View {
         HStack(spacing: 0) {
-            VolumeControl()
-                .frame(minWidth: 110, maxWidth: compact ? 150 : 230)
-                .padding(.leading, compact ? 12 : 20)
-            Spacer(minLength: 14)
-            HStack(spacing: compact ? 8 : 16) {
+            if narrow {
+                // No room for the slider: a speaker button that opens it.
+                CompactVolumeButton().padding(.leading, 8)
+            } else {
+                VolumeControl()
+                    .frame(minWidth: 110, maxWidth: compact ? 150 : 230)
+                    .padding(.leading, compact ? 12 : 20)
+            }
+            Spacer(minLength: narrow ? 8 : 14)
+            HStack(spacing: narrow ? 4 : (compact ? 8 : 16)) {
                 // Always lands on the lyrics (even from the Artwork view); closes them if showing.
                 let lyricsShown = model.showNowPlaying && prefs.nowPlayingLayout == .lyrics
                 Button {
@@ -112,7 +121,7 @@ struct PlayerBar: View {
                 Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: { Image(systemName: "list.bullet") }
                     .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                     .hoverTip("Queue")
-                FadeControl()
+                if !narrow { FadeControl() }
                 Button { openWindow(id: "mini") } label: { Image(systemName: "pip") }
                     .hoverTip("Mini Player")
                 Button { withAnimation(.spring(duration: 0.45)) { model.showNowPlaying.toggle() } } label: {
@@ -322,6 +331,24 @@ struct TimeLabel: View {
 
 /// Volume: speaker button plus a slim track that thickens on hover. The level
 /// shows in a bubble above while you adjust it (never over the track itself).
+/// Volume for narrow windows: the speaker icon (showing the level); clicking it
+/// opens the full volume slider in a small popover.
+struct CompactVolumeButton: View {
+    @EnvironmentObject var player: PlayerController
+    @State private var open = false
+    var body: some View {
+        let level = player.muted ? 0 : player.volume / 100
+        Button { open.toggle() } label: {
+            Image(systemName: level == 0 ? "speaker.slash.fill" : "speaker.wave.3.fill", variableValue: level)
+        }
+        .buttonStyle(BarIconStyle(size: 13))
+        .hoverTip("Volume")
+        .popover(isPresented: $open, arrowEdge: .top) {
+            VolumeControl().environmentObject(player).frame(width: 190).padding(.horizontal, 14).padding(.vertical, 10)
+        }
+    }
+}
+
 struct VolumeControl: View {
     @EnvironmentObject var player: PlayerController
     @State private var hover = false

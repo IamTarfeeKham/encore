@@ -99,7 +99,7 @@ struct NowPlayingView: View {
             let wide = g.size.width > 880 && !artworkOnly
             if wide {
                 HStack(spacing: 64) {
-                    artworkColumn(maxSide: min(g.size.width * 0.34, g.size.height - 250))
+                    artworkColumn(maxSide: min(g.size.width * 0.34, g.size.height - 285))
                         .frame(maxWidth: g.size.width * 0.38)
                     LyricsPane(state: lyrics.state)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -133,7 +133,7 @@ struct NowPlayingView: View {
             } else {
                 HStack {
                     Spacer(minLength: 0)
-                    artworkColumn(maxSide: min(g.size.width * 0.55, g.size.height - 250))
+                    artworkColumn(maxSide: min(g.size.width * 0.55, g.size.height - 285))
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 40)

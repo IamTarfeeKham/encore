@@ -16,7 +16,7 @@ struct EncoreApp: App {
                 .environmentObject(player)
                 .environmentObject(model)
                 .environmentObject(player.clock)
-                .frame(minWidth: 980, minHeight: 620)
+                .frame(minWidth: 620, minHeight: 440)
                 .preferredColorScheme(prefs.colorScheme)
                 .tint(prefs.accentColor)
                 .accentColor(prefs.accentColor)
@@ -71,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WebBridge.shared.start()
             NowPlayingService.shared.start()
             LockScreenArt.shared.start()
+            Updater.shared.start()
+            WidgetFeed.shared.start()
+            UserExtensions.shared.start()
             AppIcon.start()
             Task { await AppModel.shared.refreshAccount() }
         }
@@ -132,6 +135,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { PlayerController.shared.save() }
+    }
+
+    /// An automatic update that was waiting installs as you quit (like other Mac apps).
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            let u = Updater.shared
+            guard u.pendingAutomatic, u.status == .available else { return .terminateNow }
+            u.installOnQuitIfPending()
+            // The helper takes over once it has started; give it a moment.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.reply(toApplicationShouldTerminate: true) }
+            return .terminateLater
+        }
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
@@ -279,6 +294,7 @@ struct PlayerCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button("About \(AppInfo.name)") { openWindow(id: "about") }
+            Button("Check for Updates…") { Task { await Updater.shared.check(userInitiated: true) } }
         }
         CommandMenu("Controls") {
             Button(player.isPlaying ? "Pause" : "Play") { player.togglePlayPause() }

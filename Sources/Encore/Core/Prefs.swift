@@ -18,6 +18,12 @@ final class Prefs: ObservableObject {
     enum LyricsAlign: String, CaseIterable, Identifiable { case leading = "Left", center = "Centre"; var id: String { rawValue } }
     /// What Now Playing shows beside the controls: the cover with the lyrics (or with
     /// Up Next when a song has none), or just the cover, big.
+    /// When automatic updates install themselves.
+    enum AutoInstallWhen: String, CaseIterable, Identifiable {
+        case rightAway = "Right away", afterDay = "After a day", afterWeek = "After a week",
+             twoVersions = "Every 2 versions", threeVersions = "Every 3 versions"
+        var id: String { rawValue }
+    }
     enum NowPlayingLayout: String, CaseIterable, Identifiable { case lyrics = "Lyrics", artwork = "Artwork"; var id: String { rawValue } }
 
     /// Accent colours of popular apps (hex), offered as one-click presets.
@@ -104,6 +110,11 @@ final class Prefs: ObservableObject {
     /// Sidebar panel height as a fraction of the space available (0.35…1).
     @Published var sidebarHeight: Double { didSet { d.set(sidebarHeight, forKey: "sidebarHeight") } }
 
+    // Updates
+    @Published var autoCheckUpdates: Bool { didSet { d.set(autoCheckUpdates, forKey: "autoCheckUpdates") } }
+    @Published var autoInstallUpdates: Bool { didSet { d.set(autoInstallUpdates, forKey: "autoInstallUpdates") } }
+    @Published var autoInstallWhen: AutoInstallWhen { didSet { d.set(autoInstallWhen.rawValue, forKey: "autoInstallWhen") } }
+
     // General
     @Published var notifyOnTrackChange: Bool { didSet { d.set(notifyOnTrackChange, forKey: "notifyOnTrackChange") } }
     @Published var showMenuBarPlayer: Bool { didSet { d.set(showMenuBarPlayer, forKey: "showMenuBarPlayer") } }
@@ -127,6 +138,9 @@ final class Prefs: ObservableObject {
         nowPlayingLayout = s("nowPlayingLayout", b("showLyrics", true) ? .lyrics : .artwork)
         artworkMotion = b("artworkMotion", true)
         lockScreenArtwork = b("lockScreenArtwork", true)
+        autoCheckUpdates = b("autoCheckUpdates", true)
+        autoInstallUpdates = b("autoInstallUpdates", true)
+        autoInstallWhen = s("autoInstallWhen", .rightAway)
         glassTint = n("glassTint", 0.12)
         backgroundMotion = n("backgroundMotion", 1)
         followCursor = b("followCursor", true)

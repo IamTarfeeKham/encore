@@ -229,7 +229,7 @@ struct SettingsView: View {
             case .home: return "What appears on Home and in the sidebar."
             case .general: return "Menu bar, notifications and single-key shortcuts."
             case .shortcuts: return "Change any keyboard shortcut. Click a shortcut, then press the new keys."
-            case .extensions: return "Built-in versions of the best YouTube Music extensions."
+            case .extensions: return "Your own extensions, plus built-in versions of the best YouTube Music extensions."
             case .account: return "Your account, privacy and stored data."
             case .about: return "About this app."
             }
@@ -391,6 +391,7 @@ struct SettingsView: View {
                 SettingsNote("Audio quality follows your YouTube Music account (Premium streams the higher quality).")
             }
         case .extensions:
+            UserExtensionsSettings()
             SettingsCard("SponsorBlock") {
                 SettingsToggle("Skip non-music sections", $prefs.sponsorBlock,
                                detail: "Uses the community SponsorBlock database to skip talking, skits, sponsor reads and other non-music parts of music videos. Only a short anonymous hash of the video is sent.")
@@ -447,6 +448,7 @@ struct SettingsView: View {
                 SettingsToggle("Notify when the song changes (while in background)", $prefs.notifyOnTrackChange)
                 SettingsToggle("Single-key shortcuts (Space, M, J, L, R, S, +)", $prefs.singleKeyShortcuts)
             }
+            UpdatesSettings()
         case .shortcuts:
             ForEach([("Playback", [ShortcutAction.playPause, .next, .previous, .skipForward, .skipBack, .shuffle, .repeatMode, .like]),
                      ("Volume", [.volumeUp, .volumeDown, .mute]),
@@ -633,5 +635,46 @@ struct ResetButton: View {
         Button(action: action) { Label(title, systemImage: "arrow.counterclockwise").font(.system(size: 12.5, weight: .bold)) }
             .buttonStyle(CapsuleButtonStyle(prominent: false))
             .controlSize(.large)
+    }
+}
+
+
+/// Settings › General › Updates.
+struct UpdatesSettings: View {
+    @ObservedObject private var prefs = Prefs.shared
+    @ObservedObject private var updater = Updater.shared
+
+    private var statusText: String {
+        switch updater.status {
+        case .checking: return "Checking…"
+        case .installing: return "Installing…"
+        case .available: return updater.latest.map { "Version \($0.version) is available." } ?? ""
+        case .upToDate: return "You're up to date."
+        case .failed(let why): return why
+        case .idle: return updater.lastChecked == nil ? "" : "You're up to date."
+        }
+    }
+
+    var body: some View {
+        SettingsCard("Updates") {
+            SettingsRow("Version \(AppInfo.version)", detail: statusText.isEmpty ? nil : statusText) {
+                HStack(spacing: 8) {
+                    if updater.status == .available {
+                        Button("Install and Relaunch") { updater.install(relaunch: true) }
+                    }
+                    Button("Check Now") { Task { await updater.check(userInitiated: true) } }
+                        .disabled(updater.status == .checking || updater.status == .installing)
+                }
+            }
+            SettingsToggle("Check for updates automatically", $prefs.autoCheckUpdates,
+                           detail: "Looks for a new version on GitHub when the app opens and every few hours.")
+            SettingsToggle("Install updates automatically", $prefs.autoInstallUpdates,
+                           detail: "Downloads the update, checks it's genuine, replaces the old version and reopens. It waits until music isn't playing, or does it when you quit.")
+            if prefs.autoInstallUpdates {
+                SettingsRow("Install") {
+                    PillMenu(selection: $prefs.autoInstallWhen, options: Prefs.AutoInstallWhen.allCases.map { ($0, $0.rawValue) })
+                }
+            }
+        }
     }
 }
