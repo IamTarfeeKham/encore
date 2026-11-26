@@ -120,13 +120,16 @@ final class PlayerController: ObservableObject {
     private var crossfadeSkipFor: UUID?
     /// The song ended while its crossfade was still starting.
     private var endedDuringCrossfadeStart = false
-    /// Overlapping crossfade: Crossfade on, the second player ready, not in video mode.
-    private var overlapAvailable: Bool { fadeSeconds > 0 && bridge.standbyReady && !videoMode }
+    /// Overlapping crossfade: Crossfade on, the second player ready, not in video mode,
+    /// and not repeating one song. Repeat one always loops inside the playing page (a
+    /// gapless jump back, with a short volume dip when Crossfade is on): handing the
+    /// same song to the second player every loop could stall if that player was slow to
+    /// start, leaving the song stopped at its end.
+    private var overlapAvailable: Bool { fadeSeconds > 0 && bridge.standbyReady && !videoMode && repeatMode != .one }
 
-    /// Repeat one loops inside the page (gapless) unless a crossfade does the looping.
+    /// Repeat one loops inside the page (gapless).
     private func applyLoopMode(standbyReady: Bool? = nil) {
-        let overlap = fadeSeconds > 0 && (standbyReady ?? bridge.standbyReady) && !videoMode
-        bridge.setLoop(repeatMode == .one && !overlap)
+        bridge.setLoop(repeatMode == .one)
     }
     /// This ending was left gapless (Smart, same album): the next song starts at full volume.
     private var gaplessEnding = false
@@ -227,6 +230,12 @@ final class PlayerController: ObservableObject {
 
     private func handle(event type: String, info: [String: Any]) {
         let vid = info["videoId"] as? String
+        if type != "boot", UserDefaults.standard.bool(forKey: "perfLog") {   // developer log only
+            PerfMonitor.note(String(format: "event %@ video %@ (current %@) at %.1f/%.1f, app playing %d, repeat %@",
+                                    type, vid ?? "-", current?.videoId ?? "-",
+                                    (info["time"] as? Double) ?? -1, (info["duration"] as? Double) ?? -1,
+                                    isPlaying ? 1 : 0, "\(repeatMode)"))
+        }
         switch type {
         case "ended":
             guard vid == nil || vid == current?.videoId || vid == current?.counterpartVideoId else { return }
@@ -517,8 +526,22 @@ final class PlayerController: ObservableObject {
     }
 
     private func trackEnded() {
+        PerfMonitor.note("trackEnded: crossfadeRequested \(crossfadeRequested), repeat \(repeatMode)")
         // A crossfade is taking over from this song (or still starting): it does the change.
-        if crossfadeRequested { endedDuringCrossfadeStart = true; return }
+        // If the next song still hasn't started a moment after this one ended, stop
+        // waiting for the second player and change songs the normal way (no silence).
+        if crossfadeRequested {
+            endedDuringCrossfadeStart = true
+            let uid = current?.uid
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self, self.crossfadeRequested, self.endedDuringCrossfadeStart, self.current?.uid == uid else { return }
+                PerfMonitor.note("crossfade: next song still not playing 1.2 s after the end; changing songs normally")
+                self.stopCrossfade()
+                self.crossfadeSkipFor = uid
+                self.trackEnded()
+            }
+            return
+        }
         if sleepAtEndOfTrack { sleepAtEndOfTrack = false; fireSleep(); return }
         if repeatMode == .one { seek(to: 0); bridge.play(); return }
         // The song faded out; let the next one fade in.
@@ -553,7 +576,7 @@ final class PlayerController: ObservableObject {
         // Crossfade's second player (a whole YouTube Music page, ~350 MB) only exists
         // around the end of a song: it's started 40 s before (ready in about 5) and
         // closed once a crossfade is over, so most of the time there's just one.
-        if fadeSeconds > 0, !videoMode, playing, duration > 0 {
+        if fadeSeconds > 0, !videoMode, playing, duration > 0, repeatMode != .one {
             let left = duration - time
             if left < 40 { bridge.setStandbyWanted(true) }
             else if left > 90, !bridge.isCrossfading { bridge.setStandbyWanted(false) }

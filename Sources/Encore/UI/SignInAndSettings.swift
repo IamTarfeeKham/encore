@@ -285,6 +285,7 @@ struct SettingsView: View {
     @ViewBuilder private var content: some View {
         switch section {
         case .appearance:
+            AppIconSettings()
             SettingsCard("Look") {
                 SettingsRow("Appearance") { PillPicker(selection: $prefs.appearance, options: [(.system, "System", "circle.lefthalf.filled"), (.dark, "Dark", "moon.fill"), (.light, "Light", "sun.max.fill")]) }
                 SettingsRow("Panels") { PillPicker(selection: $prefs.glassStyle, options: Prefs.GlassStyle.allCases.map { ($0, $0.rawValue, nil) }) }
@@ -709,6 +710,68 @@ struct UpdatesSettings: View {
                     PillMenu(selection: $prefs.autoInstallWhen, options: Prefs.AutoInstallWhen.allCases.map { ($0, $0.rawValue) })
                 }
             }
+        }
+    }
+}
+
+
+/// Settings › Appearance › App Icon: pick the symbol and the look. Automatic follows
+/// macOS: light or dark mode, and the icon style from System Settings › Appearance.
+private struct AppIconSettings: View {
+    @ObservedObject private var prefs = Prefs.shared
+    @State private var systemTick = 0   // re-render previews when macOS's look changes
+
+    var body: some View {
+        let look = AppIcon.look(for: prefs.appIconStyle)
+        SettingsCard("App Icon") {
+            HStack(spacing: 14) {
+                ForEach(IconSymbol.allCases) { symbol in
+                    let on = prefs.appIconSymbol == symbol
+                    Button { withAnimation(.spring(duration: 0.3)) { prefs.appIconSymbol = symbol } } label: {
+                        VStack(spacing: 6) {
+                            IconPreview(symbol: symbol, look: look, tick: systemTick)
+                                .frame(width: 76, height: 76)
+                                .background(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .fill(Color.accentColor.opacity(on ? 0.18 : 0)))
+                                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .strokeBorder(Color.accentColor.opacity(on ? 0.9 : 0), lineWidth: 2))
+                            Text(symbol.rawValue).font(.system(size: 11.5, weight: on ? .semibold : .regular))
+                                .foregroundStyle(on ? .primary : .secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(symbol.rawValue) icon")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            SettingsRow("Style", detail: prefs.appIconStyle == .automatic
+                        ? "Matches macOS: light or dark mode, and the icon style in System Settings › Appearance (Default, Dark, Clear or Tinted)."
+                        : "The Dock shows this while the app is open; Finder keeps the standard icon.") {
+                PillPicker(selection: $prefs.appIconStyle, options: Prefs.AppIconStyle.allCases.map { ($0, $0.rawValue, nil) })
+            }
+        }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: .init("AppleInterfaceThemeChangedNotification"))) { _ in systemTick += 1 }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: .init("AppleColorPreferencesChangedNotification"))) { _ in systemTick += 1 }
+    }
+}
+
+/// One icon, rendered off the main thread.
+private struct IconPreview: View {
+    let symbol: IconSymbol
+    let look: IconLook
+    let tick: Int
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack {
+            if let image { Image(nsImage: image).resizable().interpolation(.high) }
+        }
+        .task(id: "\(symbol.rawValue)-\(look.rawValue)-\(tick)") {
+            let tint = AppIcon.tint
+            let (s, l) = (symbol, look)
+            let img = await Task.detached(priority: .userInitiated) { IconArt.nsImage(symbol: s, look: l, size: 160, tint: tint) }.value
+            withAnimation(.easeOut(duration: 0.15)) { image = img }
         }
     }
 }

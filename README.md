@@ -44,7 +44,7 @@
 - **Queue.** Reorder, remove, shuffle, repeat and autoplay ("radio"), plus a play history. Repeat-one loops without a gap.
 - **Crossfade.** The next song starts on a second player and plays over the end of the current one, from Off to 12 seconds.
   - A Smart mode plays albums straight through.
-  - Repeat-one crossfades back into the start.
+  - Repeat-one loops in place with a short volume dip instead (no handover, so it never stalls).
   - The second player only exists for a song's last 40 seconds.
 - **Sleep timer and playback speed.**
 
@@ -72,6 +72,7 @@
 - **Sidebar and player bar style.** With Liquid Glass, choose **Frosted** (a soft blur, the default) or **Liquid Glass** (clear and see-through).
 - **Smart empty background.** When nothing is playing, the background is built from your accent colour: a soft tint in light mode and a deep one in dark mode, so it suits whatever colour you pick.
 - **Layout.** A resizable, reorderable sidebar and rebindable keyboard shortcuts.
+- **App icon.** Choose Note, Cut-out or Wave in Settings › Appearance, in glass styles: Dark, Light, Clear (fully see-through Liquid Glass), Graphite or Red. **Automatic** (the default) matches macOS: light or dark mode, and the icon style in System Settings › Appearance (Default, Dark, Clear or Tinted, in your accent colour). The Dock shows your choice while the app is open.
 
 ### Updates
 

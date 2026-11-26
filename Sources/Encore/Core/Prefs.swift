@@ -27,6 +27,12 @@ final class Prefs: ObservableObject {
     /// How the sidebar and player bar look with Liquid Glass panels.
     enum BarSurface: String, CaseIterable, Identifiable { case frosted = "Frosted", liquid = "Liquid Glass"; var id: String { rawValue } }
     enum NowPlayingLayout: String, CaseIterable, Identifiable { case lyrics = "Lyrics", artwork = "Artwork"; var id: String { rawValue } }
+    /// The Dock icon's look. Automatic follows macOS: light or dark mode, and the icon
+    /// style in System Settings › Appearance (Default, Dark, Clear or Tinted).
+    enum AppIconStyle: String, CaseIterable, Identifiable {
+        case automatic = "Automatic", dark = "Dark", light = "Light", clear = "Clear", graphite = "Graphite", red = "Red"
+        var id: String { rawValue }
+    }
 
     /// Accent colours of popular apps (hex), offered as one-click presets.
     static let popularAccents: [(String, String)] = [
@@ -57,6 +63,9 @@ final class Prefs: ObservableObject {
     @Published var animatedBackground: Bool { didSet { d.set(animatedBackground, forKey: "animatedBackground") } }
     /// Lyrics (cover beside the lyrics, or beside Up Next) or Artwork (just the cover).
     @Published var nowPlayingLayout: NowPlayingLayout { didSet { d.set(nowPlayingLayout.rawValue, forKey: "nowPlayingLayout") } }
+    /// App icon: which symbol, and which look (Automatic matches macOS).
+    @Published var appIconSymbol: IconSymbol { didSet { d.set(appIconSymbol.rawValue, forKey: "appIconSymbol") } }
+    @Published var appIconStyle: AppIconStyle { didSet { d.set(appIconStyle.rawValue, forKey: "appIconStyle") } }
     /// The mini player and menu bar player are clear Liquid Glass (off: the cover's colours).
     @Published var glassMiniPlayers: Bool { didSet { d.set(glassMiniPlayers, forKey: "glassMiniPlayers") } }
     /// While music plays, the cover and song name appear on the Mac's lock screen.
@@ -143,6 +152,8 @@ final class Prefs: ObservableObject {
         // Earlier versions had a lyrics on/off button; "off" was this artwork view.
         nowPlayingLayout = s("nowPlayingLayout", b("showLyrics", true) ? .lyrics : .artwork)
         artworkMotion = b("artworkMotion", true)
+        appIconSymbol = s("appIconSymbol", .note)
+        appIconStyle = s("appIconStyle", .automatic)
         lockScreenArtwork = b("lockScreenArtwork", true)
         glassMiniPlayers = b("glassMiniPlayers", true)
         autoCheckUpdates = b("autoCheckUpdates", true)

@@ -16,10 +16,13 @@ ARCH="arm64"   # Apple Silicon only for now
 swift build -c release --arch "$ARCH"
 BIN="$(swift build -c release --arch "$ARCH" --show-bin-path)/Encore"
 
-# App icon (generated once from scripts/make_icon.swift).
+# App icon (generated once from scripts/make_icon.swift + the app's own IconArt.swift;
+# delete Resources/AppIcon.icns to regenerate it).
 if [ ! -f Resources/AppIcon.icns ]; then
-  ICONSET="$(mktemp -d)/AppIcon.iconset"; mkdir -p "$ICONSET"
-  swift scripts/make_icon.swift "$ICONSET/icon_512x512@2x.png"
+  ICONTMP="$(mktemp -d)"; ICONSET="$ICONTMP/AppIcon.iconset"; mkdir -p "$ICONSET"
+  cp scripts/make_icon.swift "$ICONTMP/main.swift"
+  swiftc -O "$ICONTMP/main.swift" Sources/Encore/App/IconArt.swift -o "$ICONTMP/make_icon"
+  "$ICONTMP/make_icon" "$ICONSET/icon_512x512@2x.png"
   for s in 16 32 128 256 512; do
     sips -z $s $s "$ICONSET/icon_512x512@2x.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
     d=$((s*2)); sips -z $d $d "$ICONSET/icon_512x512@2x.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null

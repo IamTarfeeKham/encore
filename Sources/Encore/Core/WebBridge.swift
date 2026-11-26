@@ -384,6 +384,7 @@ final class WebBridge: NSObject, ObservableObject {
             if page === active { Task { await refreshClientInfo() } } else { standbyDidBoot(page) }
             return
         }
+        if type == "youthere" { PerfMonitor.note("youthere prompt answered on the \(page === active ? "playing" : "second") player") }
         // Only the playing page's song concerns the app (the other one is fading
         // out, or waiting for the next song).
         guard page === active else { return }
@@ -617,6 +618,7 @@ extension WebBridge {
         const dlg = document.querySelector('ytmusic-you-there-renderer');
         if (dlg && dlg.offsetParent !== null) {
           const b = dlg.querySelector('button, yt-button-renderer, #button');
+          post({ type: 'youthere', clicked: !!b });
           if (b) b.click();
           const p = document.querySelector('#movie_player');
           if (p && p.playVideo) p.playVideo();
