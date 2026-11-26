@@ -92,7 +92,9 @@ final class InnerTube {
             let msg = (try? JSON(data: data))?.error.message.string ?? ""
             throw APIError.http(code, msg)
         }
-        return try JSON(data: data)
+        // Build the JSON tree off the main thread (a Home or album response is a few
+        // hundred KB; parsing it here cost 10-20 ms frames during launch).
+        return try await Task.detached(priority: .userInitiated) { try JSON(data: data) }.value
     }
 
     static func sapisidHash(_ sapisid: String) -> String {

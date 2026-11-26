@@ -261,14 +261,16 @@ struct TrackRow: View {
                 // (a priority let the title swallow the artist/album columns).
                 titleLine
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                ArtistLinks(artists: item.artists, fallback: item.subtitle)
+                ArtistLinks(artists: item.artists, fallback: item.subtitle, interactive: hover)
                     .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 Group {
-                    if let album = item.album {
+                    if let album = item.album, hover {
                         Text(album.name)
                             .underlineOnHover()
                             .onTapGesture { if album.browseId != nil { model.openAlbum(album) } }
+                    } else if let album = item.album {
+                        Text(album.name)
                     } else {
                         Text(playsText ?? "")
                     }
@@ -278,7 +280,7 @@ struct TrackRow: View {
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     titleLine
-                    ArtistLinks(artists: item.artists, fallback: item.subtitle)
+                    ArtistLinks(artists: item.artists, fallback: item.subtitle, interactive: hover)
                         .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -289,8 +291,19 @@ struct TrackRow: View {
             // Like · length · more as one evenly spaced cluster. The length sits
             // centred in a column wide enough for "100:00:00", so the gaps on both
             // sides of it are equal and nothing moves, however long a track is.
+            // The buttons are real controls only while the row is under the pointer;
+            // otherwise the same icons are drawn as plain images. Every control (and
+            // hover handler) on a page is re-measured on each scroll frame, and a list
+            // has hundreds of rows, so this keeps scrolling smooth.
             HStack(spacing: 4) {
-                if let vid = item.videoId {
+                if let vid = item.videoId, !hover {
+                    let isLiked = likes.liked.contains(vid)
+                    Image(systemName: isLiked ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isLiked ? Color.accentColor : .primary)
+                        .frame(width: 26, height: 26)
+                        .opacity(isLiked ? 0.85 : 0.34)
+                } else if let vid = item.videoId {
                     // Filled and in the accent colour when liked; tap again to unlike.
                     let isLiked = likes.liked.contains(vid)
                     Button {
@@ -309,13 +322,17 @@ struct TrackRow: View {
                     .font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
                     .lineLimit(1)
                     .frame(width: TrackRow.timeColumn, alignment: .center)
-                Menu {
-                    ItemMenu(item: item, playlistContext: playlistContext, onRemoved: onRemoved)
-                } label: {
-                    Image(systemName: "ellipsis").frame(width: 26, height: 26).contentShape(Rectangle())
+                if hover {
+                    Menu {
+                        ItemMenu(item: item, playlistContext: playlistContext, onRemoved: onRemoved)
+                    } label: {
+                        Image(systemName: "ellipsis").frame(width: 26, height: 26).contentShape(Rectangle())
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 26, height: 26)
+                } else {
+                    Image(systemName: "ellipsis").font(.system(size: 13))
+                        .frame(width: 26, height: 26).opacity(0.4)
                 }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 26, height: 26)
-                .opacity(hover ? 1 : 0.4)
             }
             .fixedSize()
             .pinnedToTrailingEdge()
@@ -352,11 +369,16 @@ struct TrackRow: View {
 struct ArtistLinks: View {
     let artists: [ArtistRef]
     var fallback: String = ""
+    /// Off: plain text (no hover or click handling), e.g. a list row that isn't
+    /// under the pointer; the row turns it on when hovered.
+    var interactive = true
     private var model: AppModel { .shared }
 
     var body: some View {
         if artists.isEmpty {
             Text(fallback)
+        } else if !interactive {
+            Text(artists.map(\.name).joined(separator: ", "))
         } else {
             HStack(spacing: 0) {
                 ForEach(Array(artists.enumerated()), id: \.offset) { i, a in
@@ -466,7 +488,8 @@ struct ShelfView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 // Not lazy: a shelf holds 10–25 cards, built ahead of time by the feed.
                 // A lazy stack only creates the cards visible at layout time, which left
-                // empty space on the right while the page slid after hiding the sidebar.
+                // empty space on the right while the page slid after hiding the sidebar
+                // (and building cards mid-scroll measured slower).
                 HStack(alignment: .top, spacing: 18) {
                     ForEach(Array(shelf.items.enumerated()), id: \.element.id) { i, item in
                         CardView(item: item, width: item.kind == .video ? Prefs.shared.cardWidth * 1.66 : Prefs.shared.cardWidth).id(i)

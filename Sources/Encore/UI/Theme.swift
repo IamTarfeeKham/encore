@@ -101,6 +101,8 @@ extension View {
 @MainActor
 enum ScrollActivity {
     private(set) static var isScrolling = false
+    /// Set by the developer scroll test (PerfMonitor) while it scrolls the page.
+    static func setTestScrolling(_ v: Bool) { isScrolling = v }
     private static var lastEvent = Date.distantPast
     private static var monitor: Any?
 
@@ -116,6 +118,7 @@ enum ScrollActivity {
         }
     }
 }
+
 
 // MARK: - Cursor tracking for the parallax background
 

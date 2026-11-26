@@ -36,9 +36,56 @@ final class PerfMonitor: NSObject {
                 withAnimation(Motion.panel) { AppModel.shared.sidebarVisible.toggle() }
             }
         }
+        DistributedNotificationCenter.default().addObserver(forName: .init("local.ytmusicmac.perf.scrollTest"),
+                                                            object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { self.startScrollTest() }
+        }
+    }
+
+    // MARK: Developer scroll test
+    // Scrolls the main page smoothly (like a trackpad: 1600 pt/s down, then up) and
+    // logs every frame of it, so scrolling can be measured without a person.
+    private var testScroll: NSScrollView?
+    private var testStart: CFTimeInterval = 0
+    private var testOrigin: CGFloat = 0
+
+    private func startScrollTest() {
+        guard let content = NSApp.windows.first(where: { $0.title != "Mini Player" && $0.isVisible && $0.frame.width > 600 })?.contentView
+        else { return }
+        // The tallest vertical scroll view is the page.
+        var best: NSScrollView?
+        func walk(_ v: NSView) {
+            if let s = v as? NSScrollView, s.hasVerticalScroller || (s.documentView?.frame.height ?? 0) > s.frame.height + 200,
+               (s.documentView?.frame.height ?? 0) > (best?.documentView?.frame.height ?? 0) { best = s }
+            v.subviews.forEach(walk)
+        }
+        walk(content)
+        guard let s = best else { log("scroll test: no scroll view"); return }
+        testScroll = s
+        testOrigin = s.contentView.bounds.origin.y
+        testStart = CACurrentMediaTime()
+        frames = 0; hitches = 0; worst = 0; windowStart = Date()
+        ScrollActivity.setTestScrolling(true)
+        log("scroll test: start")
+    }
+
+    private func stepScrollTest(_ now: CFTimeInterval) {
+        guard let s = testScroll else { return }
+        let t = now - testStart, speed: CGFloat = 1600, leg: Double = 3
+        let maxY = max(0, (s.documentView?.frame.height ?? 0) - s.contentView.bounds.height)
+        let y: CGFloat = t < leg ? testOrigin + speed * CGFloat(t) : testOrigin + speed * CGFloat(max(0, 2 * leg - t))
+        s.contentView.scroll(to: NSPoint(x: 0, y: min(max(0, y), maxY)))
+        s.reflectScrolledClipView(s.contentView)
+        if t >= 2 * leg {
+            testScroll = nil
+            ScrollActivity.setTestScrolling(false)
+            log(String(format: "scroll test: %d frames, %d hitches, worst %.1f ms", frames, hitches, worst * 1000))
+            frames = 0; hitches = 0; worst = 0; windowStart = Date()
+        }
     }
 
     @objc private func tick(_ l: CADisplayLink) {
+        if testScroll != nil { stepScrollTest(l.targetTimestamp) }
         expected = max(l.targetTimestamp - l.timestamp, 1.0 / 240)
         let now = l.timestamp
         defer { last = now }
@@ -58,7 +105,7 @@ final class PerfMonitor: NSObject {
                 animStart = 0
             }
         }
-        if Date().timeIntervalSince(windowStart) > 2 {
+        if testScroll == nil, Date().timeIntervalSince(windowStart) > 2 {
             log(String(format: "frames: %d frames, %d hitches, worst %.1f ms, display %.0f Hz",
                        frames, hitches, worst * 1000, 1 / expected))
             frames = 0; hitches = 0; worst = 0; windowStart = Date()

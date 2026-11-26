@@ -177,11 +177,17 @@ struct MiniPlayerView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(width: 300, height: 470)
-        .ignoresSafeArea()
+        .windowDraggable()
         .playerSurface(glass: prefs.glassMiniPlayers, radius: 24)
+        // Our own rounded shadow, in a clear margin around the card. (The system's
+        // window shadow is measured from the window's pixels and could come out as a
+        // plain rectangle, showing dark square corners.)
+        .background(CardShadow(radius: 24))
+        .padding(MiniPlayer.shadowMargin)
+        .ignoresSafeArea()
         .environment(\.colorScheme, .dark)
         .background(FloatingWindow())
-        .background(RoundedWindow(radius: 24))
+        .background(RoundedWindow(radius: 24, systemShadow: false))
         .onAppear { MiniPlayer.show() }
     }
 
@@ -255,13 +261,7 @@ struct FloatingWindow: NSViewRepresentable {
             // rounded card, with our own buttons and a shadow that follows its shape.
             w.styleMask = [.borderless, .fullSizeContentView, .miniaturizable]
             MiniPlayer.installKeyHandling()
-            w.hasShadow = true
-            w.invalidateShadow()
-            // Measure the shadow again once the rounded glass has drawn (measured too
-            // early it takes the plain rectangle's shape and shows at the corners).
-            for delay in [0.15, 0.6] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak w] in w?.invalidateShadow() }
-            }
+            w.hasShadow = false   // the card draws its own (CardShadow)
             // Track open/closed from the window itself (SwiftUI doesn't always report it).
             AppModel.shared.miniPlayerOpen = true
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
@@ -285,6 +285,8 @@ struct FloatingWindow: NSViewRepresentable {
 @MainActor
 enum MiniPlayer {
     static var window: NSWindow? { NSApp.windows.first { $0.title == "Mini Player" } }
+    /// Clear space around the card for its shadow.
+    static let shadowMargin: CGFloat = 22
 
     /// The mini player has no title bar, so it can't take the keyboard and ⌘W/⌘M
     /// would reach the main window. Instead: after you click the mini player (until
@@ -445,13 +447,14 @@ struct QueueHeader<Trailing: View>: View {
 /// a clear window, with the content clipped to the given radius.
 struct RoundedWindow: NSViewRepresentable {
     let radius: CGFloat
+    var systemShadow = true
     func makeNSView(context: Context) -> NSView {
         let v = NSView()
         DispatchQueue.main.async {
             guard let w = v.window else { return }
             w.isOpaque = false
             w.backgroundColor = .clear
-            w.hasShadow = true
+            w.hasShadow = systemShadow
             if let frame = w.contentView?.superview {
                 frame.wantsLayer = true
                 frame.layer?.cornerRadius = radius
@@ -467,6 +470,7 @@ struct RoundedWindow: NSViewRepresentable {
                 }
                 hideBackdrops(frame)
             }
+            guard systemShadow else { return }
             w.invalidateShadow()
             for delay in [0.15, 0.6] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak w] in w?.invalidateShadow() }
@@ -474,6 +478,45 @@ struct RoundedWindow: NSViewRepresentable {
         }
         return v
     }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// A soft shadow around a rounded card, drawn only outside it (so it never darkens
+/// the glass).
+struct CardShadow: View {
+    let radius: CGFloat
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        shape.fill(.black.opacity(0.42))
+            .blur(radius: 11)
+            .offset(y: 7)
+            .mask {
+                Rectangle().padding(-MiniPlayer.shadowMargin)
+                    .overlay(shape.blendMode(.destinationOut))
+                    .compositingGroup()
+            }
+            .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    /// Drag the window from anywhere on this view that isn't a control.
+    @ViewBuilder func windowDraggable() -> some View {
+        if #available(macOS 15.0, *) {
+            gesture(WindowDragGesture()).allowsWindowActivationEvents(true)
+        } else {
+            background(CardDragArea())
+        }
+    }
+}
+
+/// macOS 14: an AppKit view under the content that moves the window when dragged.
+private struct CardDragArea: NSViewRepresentable {
+    final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) { window?.performDrag(with: event) }
+        override var mouseDownCanMoveWindow: Bool { true }
+    }
+    func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 

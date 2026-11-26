@@ -48,33 +48,10 @@ struct NowPlayingView: View {
             .hoverTip("Close", edge: .bottom)
             .padding(.leading, 76)  // clear of the window buttons
             Spacer()
-            HStack(spacing: 10) {
-                // Lyrics (cover + lyrics, or cover + Up Next) or Artwork (just the cover).
-                if !player.videoMode {
-                    PillPicker(selection: $prefs.nowPlayingLayout,
-                               options: [(.lyrics, "Lyrics", "quote.bubble"), (.artwork, "Artwork", "photo")], onGlass: true,
-                               iconOnly: true, tipEdge: .bottom)
-                        .glassPanel(18)
-                        .transition(.opacity)
-                }
-                HStack(spacing: 2) {
-                    Button { withAnimation(Motion.panel) { model.showQueue.toggle() } } label: {
-                        Image(systemName: "list.bullet")
-                            .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
-                    }
-                    .hoverTip("Queue", edge: .bottom)
-                    Menu {
-                        if let item = currentItem { ItemMenu(item: item) }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                    }
-                    .menuStyle(.button).menuIndicator(.hidden)
-                    .hoverTip("More", edge: .bottom)
-                }
-                // No inset: the end buttons' hover circles meet the capsule's ends exactly.
-                .buttonStyle(BarIconStyle(size: 14, diameter: 36))
-                .glassPanel(18)
-            }
+            NowPlayingPill(layout: $prefs.nowPlayingLayout, showLayout: !player.videoMode,
+                           queueOpen: model.showQueue,
+                           toggleQueue: { withAnimation(Motion.panel) { model.showQueue.toggle() } },
+                           item: currentItem)
         }
         // Song / Video stays in the middle of the window, whatever sits either side.
         .overlay {
@@ -133,7 +110,7 @@ struct NowPlayingView: View {
             } else {
                 HStack {
                     Spacer(minLength: 0)
-                    artworkColumn(maxSide: min(g.size.width * 0.55, g.size.height - 285))
+                    artworkColumn(maxSide: min(g.size.width * 0.42, (g.size.height - 320) * 0.86, 520))
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 40)
@@ -145,20 +122,20 @@ struct NowPlayingView: View {
 
     private func artworkColumn(maxSide: CGFloat) -> some View {
         let side = max(maxSide, 200)
-        return VStack(alignment: .leading, spacing: 18) {
+        return VStack(alignment: .leading, spacing: 22) {
             Spacer(minLength: 0)
             TiltingArtwork(url: player.current?.largeArtwork, side: side, breathing: artworkMoves && player.isPlaying)
                 .scaleEffect(player.isPlaying ? 1 : 0.92)
                 .animation(.spring(duration: 0.6, bounce: 0.25), value: player.isPlaying)
             if let t = player.current {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(t.title).font(.system(size: 22, weight: .bold)).lineLimit(1)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(t.title).font(.system(size: 28, weight: .bold)).lineLimit(2)
                         if t.isExplicit { ExplicitBadge() }
                     }
-                    ArtistLinks(artists: t.artists).font(.system(size: 17)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                    ArtistLinks(artists: t.artists).font(.system(size: 20, weight: .medium)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
                     if let a = t.album {
-                        Text(a.name).font(.system(size: 13)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                        Text(a.name).font(.system(size: 15)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
                             .underlineOnHover().onTapGesture { model.openAlbum(a) }
                     }
                 }
@@ -747,5 +724,89 @@ private struct UpNextRow: View {
         .contentShape(Rectangle())
         .onHover { hover = $0 }
         .onTapGesture { PlayerController.shared.jump(to: track) }
+    }
+}
+
+
+/// Now Playing's top-right controls as one glass capsule: Lyrics · Artwork, then
+/// Queue · More. Every highlight is a capsule 2 pt inside the glass, the same as the
+/// Song / Video switch, so the fills follow the shape exactly.
+private struct NowPlayingPill: View {
+    @Binding var layout: Prefs.NowPlayingLayout
+    let showLayout: Bool
+    let queueOpen: Bool
+    let toggleQueue: () -> Void
+    let item: MediaItem?
+    @Namespace private var ns
+    @State private var hovered: String?
+
+    private static let itemSize = CGSize(width: 42, height: 32)
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if showLayout {
+                segment("lyrics", "Lyrics", "quote.bubble", on: layout == .lyrics) {
+                    withAnimation(.spring(duration: 0.32, bounce: 0.22)) { layout = .lyrics }
+                }
+                segment("artwork", "Artwork", "photo", on: layout == .artwork) {
+                    withAnimation(.spring(duration: 0.32, bounce: 0.22)) { layout = .artwork }
+                }
+                Rectangle().fill(Color.primary.opacity(0.16)).frame(width: 1, height: 16).padding(.horizontal, 3)
+            }
+            segment("queue", "Queue", "list.bullet", on: queueOpen, slides: false, action: toggleQueue)
+            Menu {
+                if let item { ItemMenu(item: item) }
+            } label: {
+                icon("ellipsis", on: false, id: "more")
+            }
+            .menuStyle(.button).menuIndicator(.hidden)
+            .buttonStyle(PillSegmentStyle())
+            .hoverTip("More", edge: .bottom)
+        }
+        .padding(2)
+        .fixedSize()
+        .glassPanel(18)
+        .animation(.easeOut(duration: 0.2), value: showLayout)
+    }
+
+    private func segment(_ id: String, _ title: String, _ symbol: String, on: Bool, slides: Bool = true,
+                         action: @escaping () -> Void) -> some View {
+        Button(action: action) { icon(symbol, on: on, id: id, slides: slides) }
+            .buttonStyle(PillSegmentStyle())
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(on ? .isSelected : [])
+            .hoverTip(title, edge: .bottom)
+    }
+
+    private func icon(_ symbol: String, on: Bool, id: String, slides: Bool = true) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .medium))
+            .symbolVariant(on ? .fill : .none)
+            .foregroundStyle(on ? Color.primary : Color.primary.opacity(0.78))
+            .frame(width: Self.itemSize.width, height: Self.itemSize.height)
+            .background {
+                if on {
+                    // Lyrics / Artwork share one sliding highlight; Queue has its own.
+                    if slides {
+                        Capsule().fill(Color.primary.opacity(0.18))
+                            .shadow(color: .black.opacity(0.18), radius: 3, y: 1)
+                            .matchedGeometryEffect(id: "layout", in: ns)
+                    } else {
+                        Capsule().fill(Color.primary.opacity(0.18))
+                    }
+                } else if hovered == id {
+                    Capsule().fill(Color.primary.opacity(0.08))
+                }
+            }
+            .contentShape(Capsule())
+            .onHover { h in withAnimation(.easeOut(duration: 0.12)) { if h { hovered = id } else if hovered == id { hovered = nil } } }
+    }
+}
+
+private struct PillSegmentStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(duration: 0.2, bounce: 0.4), value: configuration.isPressed)
     }
 }
