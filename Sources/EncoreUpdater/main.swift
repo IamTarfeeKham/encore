@@ -35,13 +35,16 @@ func run(_ tool: String, _ args: [String]) -> (Int32, String) {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: tool)
     p.arguments = args
-    let out = Pipe()
+    // Standard output only (tools like codesign print status lines on stderr).
+    let out = Pipe(), err = Pipe()
     p.standardOutput = out
-    p.standardError = out
+    p.standardError = err
     do { try p.run() } catch { return (-1, "\(error)") }
     let data = out.fileHandleForReading.readDataToEndOfFile()
+    let errData = err.fileHandleForReading.readDataToEndOfFile()
     p.waitUntilExit()
-    return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+    let text = String(decoding: data, as: UTF8.self)
+    return (p.terminationStatus, p.terminationStatus == 0 ? text : text + String(decoding: errData, as: UTF8.self))
 }
 
 func bundleID(of app: URL) -> String? {
