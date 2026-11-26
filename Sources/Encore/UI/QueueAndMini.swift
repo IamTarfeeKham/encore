@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // MARK: - Playing Next (queue inspector)
@@ -137,7 +138,9 @@ struct MiniPlayerView: View {
 
     var body: some View {
         ZStack {
-            AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.34, parallax: 0.4, energy: 1.4)
+            if !prefs.glassMiniPlayers {
+                AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.34, parallax: 0.4, energy: 1.4)
+            }
             VStack(spacing: 14) {
                 // The same breathing cover as the Artwork view (Core Animation, nearly free).
                 TiltingArtwork(url: player.current?.largeArtwork, side: 248,
@@ -175,20 +178,15 @@ struct MiniPlayerView: View {
         }
         .frame(width: 300, height: 470)
         .ignoresSafeArea()
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .glassRim(24)
+        .playerSurface(glass: prefs.glassMiniPlayers, radius: 24)
         .environment(\.colorScheme, .dark)
         .background(FloatingWindow())
         .background(RoundedWindow(radius: 24))
+        .onAppear { MiniPlayer.show() }
     }
 
     private func fadeOut(then done: @escaping () -> Void) {
-        let mini = NSApp.windows.first { $0.title == "Mini Player" }
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            mini?.animator().alphaValue = 0
-        }, completionHandler: { MainActor.assumeIsolated { done() } })
+        if let w = MiniPlayer.window { MiniPlayer.close(w, then: done) } else { done() }
     }
 
     private func openFullPlayer() {
@@ -258,6 +256,16 @@ struct FloatingWindow: NSViewRepresentable {
             w.styleMask = [.borderless, .fullSizeContentView]
             w.hasShadow = true
             w.invalidateShadow()
+            // Measure the shadow again once the rounded glass has drawn (measured too
+            // early it takes the plain rectangle's shape and shows at the corners).
+            for delay in [0.15, 0.6] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak w] in w?.invalidateShadow() }
+            }
+            // Track open/closed from the window itself (SwiftUI doesn't always report it).
+            AppModel.shared.miniPlayerOpen = true
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                MainActor.assumeIsolated { AppModel.shared.miniPlayerOpen = false }
+            }
             // Our own larger buttons replace the system's small ones.
             for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                 w.standardWindowButton(kind)?.isHidden = true
@@ -274,6 +282,56 @@ struct FloatingWindow: NSViewRepresentable {
         return v
     }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// Opens the mini player, or closes it (with a fade) if it's already open.
+@MainActor
+enum MiniPlayer {
+    static var window: NSWindow? { NSApp.windows.first { $0.title == "Mini Player" } }
+
+    static func toggle(_ open: OpenWindowAction) {
+        if let w = window, w.isVisible, w.alphaValue > 0.5 {
+            close(w)
+        } else {
+            open(id: "mini")
+            show()
+        }
+    }
+
+    /// SwiftUI may reuse the window it hid last time: make sure it's visible and
+    /// fade it in.
+    static func show() {
+        AppModel.shared.miniPlayerOpen = true
+        DispatchQueue.main.async {
+            guard let w = window else { return }
+            // A window SwiftUI kept from last time may still be ordered out.
+            if !w.isVisible { w.alphaValue = 0; w.orderFrontRegardless() }
+            if w.alphaValue < 0.99 {
+                w.alphaValue = 0
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.22
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    w.animator().alphaValue = 1
+                }
+            }
+        }
+    }
+
+    /// Fade out, close, and leave the window ready to show again.
+    static func close(_ w: NSWindow, then done: (() -> Void)? = nil) {
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.2
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            w.animator().alphaValue = 0
+        }, completionHandler: {
+            MainActor.assumeIsolated {
+                if let done { done() } else { w.close() }
+                w.orderOut(nil)
+                w.alphaValue = 1
+                AppModel.shared.miniPlayerOpen = false
+            }
+        })
+    }
 }
 
 // MARK: - Menu bar player
@@ -318,10 +376,13 @@ struct MenuBarPlayerView: View {
         }
         .padding(16)
         .frame(width: 320)
-        // Takes on the cover's colours, like the app's background (dark, so text stays readable).
-        .background(AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.42, parallax: 0, energy: 1.2))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .glassRim(18)
+        // Cover-tinted Liquid Glass (or, with glass off, the cover's colours).
+        .background {
+            if !prefs.glassMiniPlayers {
+                AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.42, parallax: 0, energy: 1.2)
+            }
+        }
+        .playerSurface(glass: prefs.glassMiniPlayers, radius: 18)
         .background(RoundedWindow(radius: 18))
         .environment(\.colorScheme, .dark)
     }
@@ -370,8 +431,20 @@ struct RoundedWindow: NSViewRepresentable {
                 frame.layer?.cornerRadius = radius
                 frame.layer?.cornerCurve = .continuous
                 frame.layer?.masksToBounds = true
+                // The system's own panel background (with smaller corners) would peek
+                // out past ours; our glass replaces it.
+                let ours = w.contentView
+                func hideBackdrops(_ v: NSView) {
+                    for sub in v.subviews where sub !== ours {   // never our own content
+                        if sub is NSVisualEffectView { sub.isHidden = true } else { hideBackdrops(sub) }
+                    }
+                }
+                hideBackdrops(frame)
             }
             w.invalidateShadow()
+            for delay in [0.15, 0.6] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak w] in w?.invalidateShadow() }
+            }
         }
         return v
     }
@@ -392,6 +465,80 @@ extension View {
                                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
                 .overlay(shape.inset(by: 1.2).strokeBorder(.white.opacity(0.07), lineWidth: 3).blur(radius: 2))
                 .allowsHitTesting(false)
+        }
+    }
+}
+
+
+/// The current cover's accent colour (bright, saturated), shared by the glass
+/// surfaces and the lock screen.
+@MainActor
+final class CoverAccent: ObservableObject {
+    static let shared = CoverAccent()
+    @Published private(set) var color = Color.white
+    private var bag: AnyCancellable?
+    private var current: URL?
+
+    private init() {
+        bag = PlayerController.shared.objectWillChange
+            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+            .sink { [weak self] in self?.refresh() }
+        refresh()
+    }
+
+    private func refresh() {
+        let url = PlayerController.shared.current?.largeArtwork
+        guard url != current else { return }
+        current = url
+        guard let url else { return }
+        Task {
+            guard let img = await ImageLoader.shared.cgImage(for: url, maxPixel: 96), url == current else { return }
+            withAnimation(.easeInOut(duration: 0.6)) { color = LockColors.accent(of: img) }
+        }
+    }
+}
+
+/// Frosted Liquid Glass tinted with the cover's colour at the top, fading down
+/// (like Canopy's player).
+private struct TintedGlass: ViewModifier {
+    let radius: CGFloat
+    @ObservedObject private var accent = CoverAccent.shared
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        // Cover colour at the top, fading down; over a darker base so it stays rich
+        // (not washed out) when the window isn't the active one.
+        let tint = LinearGradient(stops: [.init(color: accent.color.opacity(0.42), location: 0),
+                                          .init(color: accent.color.opacity(0.16), location: 0.45),
+                                          .init(color: .clear, location: 1)],
+                                  startPoint: .top, endPoint: .bottom)
+        if #available(macOS 26.0, *) {
+            content
+                .background(tint, in: shape)
+                .background(Color.black.opacity(0.28), in: shape)
+                .glassEffect(.regular, in: .rect(cornerRadius: radius))
+        } else {
+            content
+                .background(tint, in: shape)
+                .background(Color.black.opacity(0.28), in: shape)
+                .background(.regularMaterial, in: shape)
+                .clipShape(shape)
+                .glassRim(radius)
+        }
+    }
+}
+
+extension View {
+    /// Cover-tinted glass that fades to clear.
+    func tintedGlass(_ radius: CGFloat) -> some View { modifier(TintedGlass(radius: radius)) }
+
+    /// The mini players' surface: cover-tinted Liquid Glass, or (with glass off)
+    /// the cover-colour background clipped to the card; a light rim either way.
+    @ViewBuilder func playerSurface(glass: Bool, radius: CGFloat) -> some View {
+        if glass {
+            tintedGlass(radius)
+        } else {
+            clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous)).glassRim(radius)
         }
     }
 }

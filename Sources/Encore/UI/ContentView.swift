@@ -157,7 +157,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.3), value: model.sidebarVisible)
         .animation(.easeInOut(duration: 0.3), value: model.showQueue)
         .animation(.spring(duration: 0.35), value: model.toast)
-        .onReceive(NotificationCenter.default.publisher(for: .openMiniPlayer)) { _ in openWindow(id: "mini") }
+        .onReceive(NotificationCenter.default.publisher(for: .openMiniPlayer)) { _ in MiniPlayer.toggle(openWindow) }
         .onAppear { WindowOpener.open = openWindow }
         .animation(.spring(duration: 0.25, bounce: 0.15), value: search.visible)
         .sheet(isPresented: $model.showSignIn) { SignInView().appAccent() }

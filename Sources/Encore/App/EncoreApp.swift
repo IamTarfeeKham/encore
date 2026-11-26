@@ -349,7 +349,7 @@ struct PlayerCommands: Commands {
             }.shortcut(.nowPlaying)
             Button(model.showQueue ? "Hide Playing Next" : "Show Playing Next") { withAnimation(Motion.panel) { model.showQueue.toggle() } }
                 .shortcut(.queue)
-            Button("Mini Player") { openWindow(id: "mini") }.shortcut(.miniPlayer)
+            Button(model.miniPlayerOpen ? "Close Mini Player" : "Mini Player") { MiniPlayer.toggle(openWindow) }.shortcut(.miniPlayer)
             Divider()
             Button("Reload Player") { WebBridge.shared.reload() }
         }

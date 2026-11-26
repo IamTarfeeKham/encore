@@ -34,6 +34,15 @@ struct PlayerBar: View {
             .frame(height: Self.height)
         }
         .frame(height: Self.height)
+        // The whole bar takes clicks and hovers, so nothing scrolling underneath it
+        // (seen through the glass) can be selected through its empty parts.
+        .background {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.black.opacity(0.001))
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .onTapGesture {}
+                .onHover { _ in }
+        }
         .glassPanel(22, dense: true)
         .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
     }
@@ -122,8 +131,11 @@ struct PlayerBar: View {
                     .foregroundStyle(model.showQueue ? Color.accentColor : .primary)
                     .hoverTip("Queue")
                 if !narrow { FadeControl() }
-                Button { openWindow(id: "mini") } label: { Image(systemName: "pip") }
-                    .hoverTip("Mini Player")
+                Button { MiniPlayer.toggle(openWindow) } label: {
+                    Image(systemName: model.miniPlayerOpen ? "pip.fill" : "pip")
+                }
+                .foregroundStyle(model.miniPlayerOpen ? Color.accentColor : .primary)
+                .hoverTip(model.miniPlayerOpen ? "Close Mini Player" : "Mini Player")
                 Button { withAnimation(.spring(duration: 0.45)) { model.showNowPlaying.toggle() } } label: {
                     Image(systemName: model.showNowPlaying ? "chevron.down" : "chevron.up")
                 }

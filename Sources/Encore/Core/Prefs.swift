@@ -54,6 +54,8 @@ final class Prefs: ObservableObject {
     @Published var animatedBackground: Bool { didSet { d.set(animatedBackground, forKey: "animatedBackground") } }
     /// Lyrics (cover beside the lyrics, or beside Up Next) or Artwork (just the cover).
     @Published var nowPlayingLayout: NowPlayingLayout { didSet { d.set(nowPlayingLayout.rawValue, forKey: "nowPlayingLayout") } }
+    /// The mini player and menu bar player are clear Liquid Glass (off: the cover's colours).
+    @Published var glassMiniPlayers: Bool { didSet { d.set(glassMiniPlayers, forKey: "glassMiniPlayers") } }
     /// While music plays, the cover and song name appear on the Mac's lock screen.
     @Published var lockScreenArtwork: Bool { didSet { d.set(lockScreenArtwork, forKey: "lockScreenArtwork") } }
     /// The artwork view moves gently: the cover breathes, the background drifts a little more.
@@ -138,6 +140,7 @@ final class Prefs: ObservableObject {
         nowPlayingLayout = s("nowPlayingLayout", b("showLyrics", true) ? .lyrics : .artwork)
         artworkMotion = b("artworkMotion", true)
         lockScreenArtwork = b("lockScreenArtwork", true)
+        glassMiniPlayers = b("glassMiniPlayers", true)
         autoCheckUpdates = b("autoCheckUpdates", true)
         autoInstallUpdates = b("autoInstallUpdates", true)
         autoInstallWhen = s("autoInstallWhen", .rightAway)

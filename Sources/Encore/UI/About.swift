@@ -7,6 +7,7 @@ struct AboutView: View {
     private static let repo = URL(string: "https://github.com/IamTarfeeKham/encore")!
     @Environment(\.openURL) private var openURL
     @ObservedObject private var updater = Updater.shared
+    @ObservedObject private var player = PlayerController.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drift = false
 
@@ -113,19 +114,9 @@ struct AboutView: View {
         .animation(.easeInOut(duration: 4).repeatForever(autoreverses: true), value: drift)
     }
 
-    /// Deep colour with two slowly drifting glows (a small window, so cheap).
+    /// The same moving background as the main window: the current cover's colours.
     private var background: some View {
-        ZStack {
-            LinearGradient(colors: [Color(red: 0.16, green: 0.07, blue: 0.22), Color(red: 0.06, green: 0.05, blue: 0.14)],
-                           startPoint: .top, endPoint: .bottom)
-            Circle().fill(Color(red: 1, green: 0.27, blue: 0.48).opacity(0.45))
-                .frame(width: 300, height: 300).blur(radius: 90)
-                .offset(x: drift ? -70 : 40, y: drift ? -150 : -110)
-            Circle().fill(Color(red: 0.35, green: 0.3, blue: 1).opacity(0.35))
-                .frame(width: 280, height: 280).blur(radius: 90)
-                .offset(x: drift ? 90 : -20, y: drift ? 160 : 120)
-        }
-        .animation(.easeInOut(duration: 9).repeatForever(autoreverses: true), value: drift)
+        AmbientBackground(artwork: player.current?.largeArtwork, dim: 0.5, parallax: 0)
     }
 }
 

@@ -37,6 +37,8 @@ final class AppModel: ObservableObject {
     @Published var settingsSection: SettingsView.Section = .appearance
     @Published var showNowPlaying = false
     @Published var showQueue = false
+    /// The mini player window is open (the bar's button shows it filled).
+    @Published var miniPlayerOpen = false
     @Published var searchText = ""
     @Published var submittedSearch = ""
     @Published var playlists: [MediaItem] = []

@@ -341,6 +341,10 @@ struct SettingsView: View {
                 SettingsToggle("Gently animate the artwork view", $prefs.artworkMotion,
                                detail: "In the Artwork view the cover breathes slowly and the background drifts a little more. Off when Reduce Motion is on.")
             }
+            SettingsCard("Mini players") {
+                SettingsToggle("Liquid Glass mini player and menu bar player", $prefs.glassMiniPlayers,
+                               detail: "Clear glass that shows what's behind. Turn off for the cover's colours instead.")
+            }
             SettingsCard("Lock Screen") {
                 SettingsToggle("Show the song on the lock screen", $prefs.lockScreenArtwork,
                                detail: "While music plays, the cover (moving gently, like the Artwork view) and the song's name appear on your Mac's lock screen, between the clock and the password field. New: it uses a part of macOS that Apple doesn't document, so it may not appear on every macOS version.")

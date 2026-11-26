@@ -23,7 +23,7 @@
 - **Now Playing.** Full-window player with an artwork-coloured animated background that reacts to your cursor, Song/Video switching (HD video), and an Up Next list.
   - Lyrics view: the cover beside the lyrics, or beside Up Next when a song has none.
   - Artwork view: just the cover, big, breathing slowly (animated by Core Animation, so it costs almost no CPU).
-- **Lock screen player.** While music plays, the lock screen fills with the song: a moving background made from the cover, the cover, a progress bar and play controls. Tap the cover to make it big (the cover then fills the background, drifting slowly). The password box stays clear. You can turn it off.
+- **Lock screen player.** While music plays, a Liquid Glass media card (cover, song, wavy progress line in the cover's colour, controls) sits on the lock screen. Click the cover and the art fills the screen; click again to go back. You can turn it off.
 - **Desktop widgets.** Now Playing (small, medium, large: cover colours, live progress, play controls, Up Next) and Cover (just the artwork).
 - **Uploads.** Your uploaded songs, albums and artists in the Library, and uploading more: drop audio files on the page or choose Upload Music (MP3, M4A, FLAC, OGG, WMA).
 - **Synced lyrics.** Word-by-word karaoke highlighting, using Better Lyrics word timings, LRCLIB line timings, or YouTube Music's own lyrics.
