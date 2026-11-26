@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 /// In-app updates from GitHub Releases. Checks quietly (at launch, then every few
 /// hours), and installs either when you say so (Check for Updates…) or by itself,
@@ -36,6 +37,11 @@ final class Updater: ObservableObject {
     /// How many releases are newer than this copy.
     @Published private(set) var behind = 0
     @Published private(set) var lastChecked: Date?
+    /// While installing: what's happening, and download progress (0…1).
+    @Published private(set) var phase = ""
+    @Published private(set) var progress: Double = 0
+    @Published private(set) var bytesText = ""
+    private var progressPanel: NSPanel?
 
     private var timer: Timer?
     private var waitForPause: AnyCancellable?
@@ -179,16 +185,44 @@ final class Updater: ObservableObject {
             return
         }
         status = .installing
+        showProgress(release.version)
         Task {
             do {
+                // Download here (with progress shown), then hand the file to the helper.
+                phase = "Downloading \(AppInfo.name) \(release.version)…"
+                var zipReq = URLRequest(url: release.zip)
+                zipReq.setValue("Encore-Updater", forHTTPHeaderField: "User-Agent")
+                let (stream, response) = try await URLSession.shared.bytes(for: zipReq)
+                let total = max(response.expectedContentLength, 1)
+                var data = Data(); data.reserveCapacity(Int(total))
+                var buffer = [UInt8](); buffer.reserveCapacity(65_536)
+                for try await byte in stream {
+                    buffer.append(byte)
+                    if buffer.count == 65_536 {
+                        data.append(contentsOf: buffer); buffer.removeAll(keepingCapacity: true)
+                        progress = Double(data.count) / Double(total)
+                        bytesText = String(format: "%.1f of %.1f MB", Double(data.count) / 1_048_576, Double(total) / 1_048_576)
+                    }
+                }
+                data.append(contentsOf: buffer)
+                progress = 1
+                guard (response as? HTTPURLResponse)?.statusCode == 200, data.count > 1000 else {
+                    throw APIError.message("The download didn't finish.")
+                }
+                phase = "Installing… \(AppInfo.name) will reopen in a moment."
+                bytesText = ""
+                let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                try FileManager.default.createDirectory(at: cachesDir, withIntermediateDirectories: true)
+                let zipFile = cachesDir.appendingPathComponent("EncoreUpdate.zip")
+                try data.write(to: zipFile, options: .atomic)
                 var req = URLRequest(url: release.signature)
                 req.setValue("Encore-Updater", forHTTPHeaderField: "User-Agent")
-                let (data, _) = try await URLSession.shared.data(for: req)
-                let sig = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                let (sigData, _) = try await URLSession.shared.data(for: req)
+                let sig = String(decoding: sigData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard Data(base64Encoded: sig) != nil else { throw APIError.message("The release has no valid signature.") }
                 // A sandboxed app can't pass launch arguments, so the request goes in a
                 // small file in this app's own data folder, which the helper reads.
-                let request: [String: Any] = ["url": release.zip.absoluteString, "signature": sig,
+                let request: [String: Any] = ["url": release.zip.absoluteString, "zipPath": zipFile.path, "signature": sig,
                                               "app": Bundle.main.bundleURL.path,
                                               "pid": Int(ProcessInfo.processInfo.processIdentifier),
                                               "relaunch": relaunch]
@@ -200,12 +234,39 @@ final class Updater: ObservableObject {
                 config.createsNewApplicationInstance = true
                 _ = try await NSWorkspace.shared.openApplication(at: helperURL, configuration: config)
                 PlayerController.shared.save()
-                if relaunch { NSApp.terminate(nil) }
+                if relaunch {
+                    try? await Task.sleep(nanoseconds: 700_000_000)   // let "Installing…" be seen
+                    NSApp.terminate(nil)
+                } else { hideProgress() }
             } catch {
-                status = .failed("The update couldn't start. \(error.localizedDescription)")
+                hideProgress()
+                status = .failed("The update couldn't finish. \(error.localizedDescription)")
+                let alert = NSAlert()
+                alert.messageText = "The update couldn't finish"
+                alert.informativeText = error.localizedDescription + "\nNothing was changed. You can try again from Check for Updates."
+                alert.runModal()
             }
         }
     }
+
+    // MARK: Progress window
+
+    private func showProgress(_ version: String) {
+        progress = 0; bytesText = ""; phase = "Getting ready…"
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 150),
+                        styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        p.titlebarAppearsTransparent = true
+        p.titleVisibility = .hidden
+        p.isMovableByWindowBackground = true
+        p.level = .floating
+        p.contentView = NSHostingView(rootView: UpdateProgressView(version: version))
+        p.center()
+        p.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        progressPanel = p
+    }
+
+    private func hideProgress() { progressPanel?.close(); progressPanel = nil }
 
     // MARK: Check for Updates…
 
@@ -237,5 +298,31 @@ final class Updater: ObservableObject {
             alert.runModal()
         default: break
         }
+    }
+}
+
+
+/// The update window: what's happening and how far along it is.
+private struct UpdateProgressView: View {
+    let version: String
+    @ObservedObject private var updater = Updater.shared
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 56, height: 56)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Updating to \(version)").font(.system(size: 15, weight: .semibold))
+                Text(updater.phase).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if updater.progress < 1 {
+                    ProgressView(value: updater.progress).progressViewStyle(.linear)
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
+                Text(updater.bytesText.isEmpty ? " " : updater.bytesText)
+                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 22).padding(.top, 28).padding(.bottom, 18)
+        .frame(width: 360)
     }
 }

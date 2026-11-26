@@ -75,6 +75,8 @@ func fail(_ why: String, reopen app: URL?) -> Never {
     exit(1)
 }
 
+// The app usually downloads the zip itself (showing progress) and passes its path.
+let localZip = arg("--zipPath").map(URL.init(fileURLWithPath:)).flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
 guard let urlString = arg("--url"), let url = URL(string: urlString), url.scheme == "https",
       let host = url.host, host == "github.com" || host.hasSuffix(".githubusercontent.com"),
       let signature = arg("--signature").flatMap({ Data(base64Encoded: $0) }),
@@ -95,7 +97,9 @@ let reopenOnFail: URL? = relaunch ? target : nil
 log("updating \(target.path) from \(url.absoluteString)")
 
 // 1. Download.
-guard let zip = try? Data(contentsOf: url), zip.count > 1000 else { fail("download failed", reopen: reopenOnFail) }
+guard let zip = (localZip.flatMap { try? Data(contentsOf: $0) }) ?? (try? Data(contentsOf: url)), zip.count > 1000
+else { fail("download failed", reopen: reopenOnFail) }
+if let localZip { try? FileManager.default.removeItem(at: localZip) }
 
 // 2. Signature.
 guard let keyData = Data(base64Encoded: releasePublicKey),
