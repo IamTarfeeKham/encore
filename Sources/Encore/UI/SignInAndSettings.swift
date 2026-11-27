@@ -386,7 +386,11 @@ struct SettingsView: View {
         case .lyrics:
             SettingsCard("Source") {
                 SettingsRow("Lyrics source") { PillMenu(selection: $prefs.lyricsSource, options: Prefs.LyricsSource.allCases.map { ($0, $0.rawValue) }) }
-                SettingsNote("Best available looks for lyrics timed word by word (Better Lyrics, KuGou, NetEase Cloud Music), so the highlight follows the singer, pauses and held notes included. Then it tries line-synced lyrics (Better Lyrics, LRCLIB), then YouTube Music's own. Only the song title, artist, album and length are sent.")
+                SettingsNote("Best available looks for lyrics timed word by word (Better Lyrics, Better Lyrics Unison, KuGou, NetEase Cloud Music, LRCLIB), so the highlight follows the singer, pauses and held notes included. Then it tries line-synced lyrics (Better Lyrics, LRCLIB), then YouTube Music's own. Only the song title, artist, album and length are sent.")
+                if BetterLyricsExtension.isSupported {
+                    SettingsToggle("Use the Better Lyrics extension", $prefs.lyricsBetterLyricsExtension,
+                                   detail: "For songs the sources above can't time word by word, Encore runs the Better Lyrics browser extension (betterlyrics.org) in a hidden, silent page, which asks many more services such as Musixmatch and QQ Music. Version \(BetterLyricsExtension.version) is downloaded once from its GitHub release and checked before it runs.")
+                }
             }
             SettingsCard("Display") {
                 SettingsRow("Highlight", detail: "Songs whose lyrics are only timed line by line light a whole line at a time, so the highlight never runs ahead of the singer.") { PillPicker(selection: $prefs.lyricsStyle, options: Prefs.LyricsStyle.allCases.map { ($0, $0.rawValue, nil) }) }

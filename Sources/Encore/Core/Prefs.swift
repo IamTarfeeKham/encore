@@ -90,6 +90,9 @@ final class Prefs: ObservableObject {
     @Published var lyricsLift: Bool { didSet { d.set(lyricsLift, forKey: "lyricsLift") } }
     /// Small soft sparkles drift up off long, held notes.
     @Published var lyricsParticles: Bool { didSet { d.set(lyricsParticles, forKey: "lyricsParticles") } }
+    /// Run the Better Lyrics extension (downloaded from its GitHub release) for songs
+    /// Encore's own sources can't time word by word.
+    @Published var lyricsBetterLyricsExtension: Bool { didSet { d.set(lyricsBetterLyricsExtension, forKey: "lyricsBetterLyricsExtension") } }
 
     // Extensions
     @Published var sponsorBlock: Bool { didSet { d.set(sponsorBlock, forKey: "sponsorBlock") } }
@@ -178,6 +181,7 @@ final class Prefs: ObservableObject {
         lyricsBlur = b("lyricsBlur2", false)
         lyricsLift = b("lyricsLift", true)
         lyricsParticles = b("lyricsParticles", true)
+        lyricsBetterLyricsExtension = b("lyricsBetterLyricsExtension", true)
         sponsorBlock = b("sponsorBlock", true)
         sponsorCategories = d.stringArray(forKey: "sponsorCategories") ?? ["music_offtopic", "sponsor", "selfpromo", "interaction"]
         eqEnabled = b("eqEnabled", false)
@@ -216,7 +220,7 @@ final class Prefs: ObservableObject {
     }
     func resetLyrics() {
         lyricsSource = .auto; lyricsStyle = .wipe; lyricsAlign = .leading; lyricsSize = 30
-        lyricsOffset = 0; lyricsGlow = true; lyricsBlur = false; lyricsLift = true; lyricsParticles = true
+        lyricsOffset = 0; lyricsGlow = true; lyricsBlur = false; lyricsLift = true; lyricsParticles = true; lyricsBetterLyricsExtension = true
     }
 }
 

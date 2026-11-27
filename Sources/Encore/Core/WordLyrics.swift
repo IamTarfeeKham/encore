@@ -124,6 +124,28 @@ extension LyricsService {
         return lines.count >= 2 ? lines : nil
     }
 
+    // MARK: Better Lyrics Unison (community lyrics, looked up by YouTube video)
+
+    nonisolated static func unison(_ t: Track) async -> Lyrics? {
+        var c = URLComponents(string: "https://unison.betterlyrics.org/lyrics")!
+        c.queryItems = [URLQueryItem(name: "v", value: t.videoId)]
+        guard let j = await getJSON(c.url!), let body = j.data.lyrics.string, !body.isEmpty else { return nil }
+        let word = j.data.syncType.string == "richsync"
+        switch j.data.format.string {
+        case "ttml":
+            guard let parsed = TTMLParser.parseDetailed(body), !parsed.lines.isEmpty, fits(parsed.lines, t.duration) else { return nil }
+            return Lyrics(lines: withBreaks(parsed.lines), synced: true,
+                          source: "Better Lyrics Unison (\(parsed.lineTimed ? "line" : "word")-synced)")
+        case "lrc":
+            guard var l = parseLRC(body), fits(l.lines, t.duration) else { return nil }
+            l.lines = withBreaks(l.lines)
+            l.source = "Better Lyrics Unison (\(word && l.wordTimed ? "word" : "line")-synced)"
+            return l
+        default:
+            return nil
+        }
+    }
+
     // MARK: Shared
 
     /// One timed piece of text. A trailing space means the next piece starts a new word;
@@ -183,10 +205,22 @@ extension LyricsService {
         return abs(candidate - track) <= 4
     }
 
+    /// A private session for lyrics lookups that never keeps or sends cookies. (NetEase
+    /// tags a client with a cookie on its first request and then answers searches that
+    /// carry it with unrelated songs; no lyrics service needs to know who is asking.)
+    nonisolated static let lyricsSession: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.httpCookieAcceptPolicy = .never
+        c.httpShouldSetCookies = false
+        c.httpCookieStorage = nil
+        c.urlCache = nil
+        return URLSession(configuration: c)
+    }()
+
     nonisolated static func getJSON(_ url: URL) async -> JSON? {
         var req = URLRequest(url: url, timeoutInterval: 8)
         req.setValue("\(AppInfo.name)/\(AppInfo.version) (macOS desktop client)", forHTTPHeaderField: "User-Agent")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await lyricsSession.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return try? JSON(data: data)
     }

@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WidgetFeed.shared.start()
             UserExtensions.shared.start()
             AppIcon.start()
+            LyricsBench.runIfRequested()
             Task { await AppModel.shared.refreshAccount() }
         }
         // Single-key shortcuts (only when not typing): Space play/pause, R repeat, S shuffle, L like.

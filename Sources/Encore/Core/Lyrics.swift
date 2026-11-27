@@ -23,7 +23,7 @@ struct Lyrics: Sendable {
     var synced: Bool
     var source: String
     /// Each word has its own timing from the source (not spread out by us).
-    var wordTimed: Bool { lines.contains { $0.exactWords } }
+    var wordTimed: Bool { lines.contains { $0.exactWords && !$0.text.isEmpty } }   // (breaks don't count)
 }
 
 /// Synced lyrics from LRCLIB (free, open database), falling back to YouTube
@@ -58,17 +58,10 @@ final class LyricsService: ObservableObject {
             var result: Lyrics?
             let src = source
             if src == .auto || src == .wordSynced {
-                // Ask every word-timed source at once, then take the most precise answer:
-                // Better Lyrics (syllables, background vocals) → KuGou → NetEase. Lyrics
-                // timed only per line come after any of those.
-                async let better = Self.wordSynced(track)
-                async let kugou = Self.kugou(track)
-                async let netease = Self.netease(track)
-                let (b, k, n) = await (better, kugou, netease)
-                let byWord = [b, k, n].compactMap { $0 }.first { $0.wordTimed }
-                result = byWord ?? b
+                result = await Self.firstGood(track)
+            } else if src == .lineSynced {
+                result = await Self.lrclib(track)
             }
-            if result == nil, src == .auto || src == .lineSynced { result = await Self.lrclib(track) }
             if result == nil, let bid = ytLyricsBrowseId,
                let yt = try? await InnerTube.shared.lyrics(browseId: bid) {
                 let lines = yt.text.components(separatedBy: "\n").enumerated().map {
@@ -78,8 +71,61 @@ final class LyricsService: ObservableObject {
             }
             guard loadedFor == key else { return }
             if let result { cache[key] = result; state = .loaded(result) }
+            else if src == .auto || src == .wordSynced { state = .loading }   // Better Lyrics may still find some (below)
             else { state = .unavailable }
+            // Nothing timed word by word: let the Better Lyrics extension try. Its answer
+            // replaces line timing (or nothing); word timing already shown stays.
+            if result?.wordTimed != true, src == .auto || src == .wordSynced {
+                let ext = await BetterLyricsExtension.shared.lyrics(for: track.videoId)
+                guard loadedFor == key else { return }
+                if let ext, ext.wordTimed || result?.synced != true {
+                    cache[key] = ext; state = .loaded(ext)
+                    PerfMonitor.note("lyrics \(track.title) → \(ext.source)")
+                } else if result == nil {
+                    state = .unavailable
+                }
+            }
         }
+    }
+
+    /// Asks every source at once and returns as soon as the answer is clear, so one slow
+    /// service never holds the lyrics up:
+    /// - Better Lyrics timed word by word (syllables, background vocals): taken at once.
+    /// - Otherwise the first word-timed answer from the others (Unison, KuGou, NetEase,
+    ///   LRCLIB), once Better Lyrics has answered or 2 s have passed.
+    /// - Otherwise, when everyone has answered: the best line-timed lyrics.
+    nonisolated static func firstGood(_ track: Track) async -> Lyrics? {
+        let order = ["better", "unison", "kugou", "netease", "lrclib"]
+        let started = Date()
+        let picked: (String, Lyrics?) = await withTaskGroup(of: (String, Lyrics?).self) { g in
+            g.addTask { ("better", await wordSynced(track)) }
+            g.addTask { ("unison", await unison(track)) }
+            g.addTask { ("kugou", await kugou(track)) }
+            g.addTask { ("netease", await netease(track)) }
+            g.addTask { ("lrclib", await lrclib(track)) }
+            g.addTask { try? await Task.sleep(nanoseconds: 2_000_000_000); return ("tick", nil) }
+            var got: [String: Lyrics] = [:]
+            var answered = Set<String>()
+            func best(_ ok: (Lyrics) -> Bool) -> (String, Lyrics)? {
+                for k in order { if let l = got[k], ok(l) { return (k, l) } }
+                return nil
+            }
+            for await (k, l) in g {
+                answered.insert(k)
+                if let l { got[k] = l }
+                if let b = got["better"], b.wordTimed { g.cancelAll(); return ("better", b) }
+                let waitedEnough = answered.contains("better") || answered.contains("tick")
+                if waitedEnough, let w = best({ $0.wordTimed }) { g.cancelAll(); return w }
+                if answered.isSuperset(of: order) { break }
+            }
+            g.cancelAll()
+            if let w = best({ $0.wordTimed }) { return w }
+            if let s = best({ $0.synced }) { return s }
+            return ("none", nil)
+        }
+        PerfMonitor.note(String(format: "lyrics %@ | %@ | %ds → %@ in %.1fs", track.title, track.artistLine,
+                                Int(track.duration ?? 0), picked.1?.source ?? "none", Date().timeIntervalSince(started)))
+        return picked.1
     }
 
     // MARK: Word-synced (Better Lyrics open lyrics API, TTML with per-word timing)
@@ -155,7 +201,7 @@ final class LyricsService: ObservableObject {
     nonisolated private static func fetch(_ url: URL) async -> JSON? {
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.setValue("\(AppInfo.name)/\(AppInfo.version) (macOS desktop client)", forHTTPHeaderField: "User-Agent")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await lyricsSession.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return try? JSON(data: data)
     }

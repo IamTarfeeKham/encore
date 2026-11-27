@@ -37,7 +37,7 @@
 - **Full-window player** with an artwork-coloured animated background that reacts to your cursor, Song/Video switching (HD video), and Up Next. Two views, switched with the icons at the top:
   - **Lyrics:** the cover beside the lyrics, or beside Up Next when a song has none.
   - **Artwork:** just the cover, big and slowly breathing. It's animated by Core Animation, so it costs almost no CPU, and you can turn the motion off.
-- **Synced lyrics that follow the singer.** Word-by-word karaoke timed to the recording, so the highlight waits through pauses and holds on long notes. Each syllable fills with a soft edge, letters rise as they're sung, a soft glow follows the voice, and sparkles drift off held notes. Word timings come from Better Lyrics, KuGou or NetEase Cloud Music; songs timed only line by line light a whole line at a time (from Better Lyrics or LRCLIB), and YouTube Music's own lyrics are the last resort. Highlight style, alignment, size, glow, rise, sparkles and blur are all adjustable.
+- **Synced lyrics that follow the singer.** Word-by-word karaoke timed to the recording, so the highlight waits through pauses and holds on long notes. Each syllable fills with a soft edge, letters rise as they're sung, a soft glow follows the voice, and sparkles drift off held notes. Word timings come from Better Lyrics, Better Lyrics Unison, KuGou, NetEase Cloud Music or LRCLIB; for songs none of those can time word by word, Encore runs the Better Lyrics extension itself (macOS 15.4+), which reaches Musixmatch, QQ Music and more. Songs timed only line by line light a whole line at a time (from Better Lyrics or LRCLIB), and YouTube Music's own lyrics are the last resort. Highlight style, alignment, size, glow, rise, sparkles and blur are all adjustable.
 
 ### Playback
 
@@ -127,7 +127,7 @@ You can also open `Package.swift` in Xcode. The package has three targets: the a
 | Interface | SwiftUI. The karaoke lyrics, the breathing artwork and the moving backgrounds are drawn with Core Animation, so they stay cheap. |
 | Library and search | YouTube Music's InnerTube JSON API (`Core/InnerTube.swift`, `Core/Parser.swift`), authenticated with your signed-in session. The parser skips anything it doesn't recognise, so a change on Google's side breaks one section, not the app. |
 | Playback | A hidden `WKWebView` runs music.youtube.com, and Encore drives YouTube's own player (`Core/WebBridge.swift`). Stream deciphering, Premium quality and DRM stay in Google's code. |
-| Lyrics | Word-timed lyrics from Better Lyrics (TTML), KuGou (KRC) and NetEase Cloud Music (YRC), asked at once; then line-timed Better Lyrics or LRCLIB; then YouTube Music (`Core/Lyrics.swift`, `Core/WordLyrics.swift`). |
+| Lyrics | Word-timed lyrics from Better Lyrics (TTML), Better Lyrics Unison, KuGou (KRC), NetEase Cloud Music (YRC) and LRCLIB (enhanced LRC), asked at once; then line-timed lyrics; then YouTube Music (`Core/Lyrics.swift`, `Core/WordLyrics.swift`). For the rest, the Better Lyrics extension runs unchanged in a hidden, silent page through WebKit's web-extension support (`Core/BetterLyricsExtension.swift`). |
 | Lock screen | A non-activating panel placed above the lock screen (`UI/LockScreenArt.swift`). |
 | Widgets | A WidgetKit extension that reads what's playing from a shared folder (`Sources/EncoreWidgets`). |
 | Updates | The app downloads the release; a small helper (`Sources/EncoreUpdater`) verifies its signature and swaps it in. |
@@ -144,7 +144,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more.
 - **Signed updates.** Each release zip is signed with an Ed25519 key. The updater refuses any download whose signature doesn't match, or that isn't Encore.
 - **Sign Out** wipes all cookies, website data and the saved queue.
 - **No tracking.** There's no analytics or telemetry. Third-party services see only what they need:
-  - **Lyrics lookups** send the song title, artist, album and length.
+  - **Lyrics lookups** send the song title, artist, album and length, with no cookies.
+  - **The Better Lyrics extension** is downloaded once from its official GitHub release and runs only if it matches a fixed checksum. Its page keeps no website data (signed out, no history) and never plays anything. Turn it off in Settings › Lyrics.
   - **SponsorBlock** receives only the first 4 characters of a hash of the video ID.
   - **Update checks** read the public releases feed on GitHub.
 
@@ -165,7 +166,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more.
 ## Credits
 
 - Lyric timing behaviour is modelled on Better Lyrics and [ytm-rs](https://github.com/grapedjuice/ytm-rs). It was reimplemented from scratch, and no code was copied.
-- Lyrics data comes from Better Lyrics, [LRCLIB](https://lrclib.net), KuGou and NetEase Cloud Music.
+- Lyrics data comes from Better Lyrics (including its Unison community lyrics), [LRCLIB](https://lrclib.net), KuGou and NetEase Cloud Music.
+- The [Better Lyrics](https://github.com/better-lyrics/better-lyrics) extension (GPLv3) is downloaded from its own release and run unmodified; it isn't part of Encore's code.
 - Segment data comes from [SponsorBlock](https://sponsor.ajay.app).
 
 ## License
