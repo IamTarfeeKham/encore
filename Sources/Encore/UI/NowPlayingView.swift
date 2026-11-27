@@ -350,14 +350,18 @@ struct LyricLook: Equatable {
     var center: Bool
     var blur: Bool
     var glow: Bool
+    var lift: Bool
+    var particles: Bool
     var style: Prefs.LyricsStyle
     var offset: Double
     var font: Font { .system(size: size, weight: .bold) }
 
     @MainActor static var current: LyricLook {
         let p = Prefs.shared
+        let calm = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         return LyricLook(size: p.lyricsSize, center: p.lyricsAlign == .center, blur: p.lyricsBlur,
-                         glow: p.lyricsGlow, style: p.lyricsStyle, offset: p.lyricsOffset)
+                         glow: p.lyricsGlow, lift: p.lyricsLift && !calm, particles: p.lyricsParticles && !calm,
+                         style: p.lyricsStyle, offset: p.lyricsOffset)
     }
 }
 
@@ -401,7 +405,12 @@ struct SyncedLyricsView: View {
                 let t = player.clock.now() + look.offset + lead
                 let idx = activeIndex(at: t)
                 if idx != active { active = idx }
-                let target = activeIndex(at: t + 0.5)
+                var target = activeIndex(at: t + 0.5)
+                // Wait for the singer: with real word timing, don't move off a line while its
+                // last word is still being sung — but start early enough (0.35 s ahead) that
+                // the next line still arrives with the voice. (Guessed timing never holds.)
+                if let a = idx, let tg = target, tg > a, lyrics.lines[a].exactWords, lyrics.lines[a].end > t,
+                   lyrics.lines[tg].start - t > 0.35 { target = a }
                 if target != scrolledTo {
                     scrolledTo = target
                     if let target, Date().timeIntervalSince(userScrolledAt) > 3 {
@@ -444,7 +453,7 @@ struct LyricRow: View, Equatable {
             } else {
                 // One renderer for every line (active or not): no second copy, no jump.
                 KaraokeLineView(line: line, look: look, active: isActive,
-                                dimAlpha: 0.3,
+                                dimAlpha: KaraokeLayerView.unsungAlpha,
                                 blur: isActive || !look.blur ? 0 : CGFloat(min(Double(abs(distance)) * 1.1, 4)))
                     .frame(maxWidth: .infinity, alignment: look.center ? .center : .leading)
             }

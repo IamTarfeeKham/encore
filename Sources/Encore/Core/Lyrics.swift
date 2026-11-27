@@ -22,6 +22,8 @@ struct Lyrics: Sendable {
     var lines: [LyricLine]
     var synced: Bool
     var source: String
+    /// Each word has its own timing from the source (not spread out by us).
+    var wordTimed: Bool { lines.contains { $0.exactWords } }
 }
 
 /// Synced lyrics from LRCLIB (free, open database), falling back to YouTube
@@ -55,7 +57,17 @@ final class LyricsService: ObservableObject {
         Task {
             var result: Lyrics?
             let src = source
-            if src == .auto || src == .wordSynced { result = await Self.wordSynced(track) }
+            if src == .auto || src == .wordSynced {
+                // Ask every word-timed source at once, then take the most precise answer:
+                // Better Lyrics (syllables, background vocals) → KuGou → NetEase. Lyrics
+                // timed only per line come after any of those.
+                async let better = Self.wordSynced(track)
+                async let kugou = Self.kugou(track)
+                async let netease = Self.netease(track)
+                let (b, k, n) = await (better, kugou, netease)
+                let byWord = [b, k, n].compactMap { $0 }.first { $0.wordTimed }
+                result = byWord ?? b
+            }
             if result == nil, src == .auto || src == .lineSynced { result = await Self.lrclib(track) }
             if result == nil, let bid = ytLyricsBrowseId,
                let yt = try? await InnerTube.shared.lyrics(browseId: bid) {
@@ -79,11 +91,12 @@ final class LyricsService: ObservableObject {
         if let d = t.duration { c.queryItems?.append(URLQueryItem(name: "d", value: String(Int(d)))) }
         if let al = t.album?.name { c.queryItems?.append(URLQueryItem(name: "al", value: al)) }
         guard let j = await fetch(c.url!), let ttml = j.ttml.string, !ttml.isEmpty else { return nil }
-        guard var lines = TTMLParser.parse(ttml), !lines.isEmpty else { return nil }
+        guard let parsed = TTMLParser.parseDetailed(ttml), !parsed.lines.isEmpty else { return nil }
+        var lines = parsed.lines
         // Sanity check against the track length: a different version would be badly out of sync.
         if let d = t.duration, let last = lines.last, last.end > d + 8 { return nil }
         lines = withBreaks(lines)
-        return Lyrics(lines: lines, synced: true, source: "Better Lyrics (word-synced)")
+        return Lyrics(lines: lines, synced: true, source: parsed.lineTimed ? "Better Lyrics (line-synced)" : "Better Lyrics (word-synced)")
     }
 
     /// Inserts instrumental-break lines (shown as breathing dots) into long gaps.
@@ -171,6 +184,7 @@ final class LyricsService: ObservableObject {
         raw.sort { $0.0 < $1.0 }
 
         let wordTag = try! NSRegularExpression(pattern: #"<(\d{1,3}:\d{1,2}(?:[.,]\d{1,3})?)>"#)
+        let pace = singingPace(raw)
         var lines: [LyricLine] = []
         for (i, (start, text)) in raw.enumerated() {
             let nextStart = i + 1 < raw.count ? raw[i + 1].0 : start + 6
@@ -195,7 +209,7 @@ final class LyricsService: ObservableObject {
             }
             clean = clean.trimmingCharacters(in: .whitespaces)
             if words.isEmpty, !clean.isEmpty {
-                words = estimateWords(clean, start: start, nextStart: nextStart)
+                words = estimateWords(clean, start: start, nextStart: nextStart, pace: pace)
             }
             let end = exact ? (words.last?.end ?? nextStart) : (words.last?.end ?? nextStart)
             lines.append(LyricLine(id: i, start: start, end: min(end, nextStart), text: clean, words: words, exactWords: exact))
@@ -203,19 +217,44 @@ final class LyricsService: ObservableObject {
         return Lyrics(lines: lines, synced: true, source: "LRCLIB")
     }
 
-    /// Spreads a line's words over the time it is likely being sung.
-    nonisolated static func estimateWords(_ text: String, start: Double, nextStart: Double) -> [LyricWord] {
+    /// How fast this singer gets through a line, in characters per second: the median over
+    /// the song's lines of (characters ÷ time until the next line). A slow ballad comes out
+    /// around 3–5, a fast song 12–16. Lines followed by an instrumental break are outliers
+    /// that the median ignores.
+    nonisolated static func singingPace(_ raw: [(Double, String)]) -> Double {
+        var rates: [Double] = []
+        for i in 0..<max(raw.count - 1, 0) {
+            let chars = Double(raw[i].1.trimmingCharacters(in: .whitespaces).count)
+            let gap = raw[i + 1].0 - raw[i].0
+            if chars >= 3, gap > 0.3 { rates.append(chars / gap) }
+        }
+        guard !rates.isEmpty else { return 13 }
+        rates.sort()
+        return min(max(rates[rates.count / 2], 2.5), 16)
+    }
+
+    /// Spreads a line's words over the time it is likely being sung (at this song's pace;
+    /// a gap much longer than that is taken to end in an instrumental tail).
+    nonisolated static func estimateWords(_ text: String, start: Double, nextStart: Double, pace: Double = 13) -> [LyricWord] {
+        let chars = Double(text.count + 1)
+        let gap = max(nextStart - start, 0.4)
+        let sung = min(gap * 0.94, max(chars / pace * 1.08, 1.2))
+        return spreadWords(text, from: start, to: start + sung)
+    }
+
+    /// Spreads words across a known sung span, by length, with the last word held a little
+    /// longer (singers usually hang on the end of a phrase).
+    nonisolated static func spreadWords(_ text: String, from start: Double, to end: Double) -> [LyricWord] {
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard !tokens.isEmpty else { return [] }
-        let chars = Double(tokens.reduce(0) { $0 + $1.count + 1 })
-        let gap = max(nextStart - start, 0.4)
-        // Long gaps usually include an instrumental tail; assume ~13 chars/s singing.
-        let sung = min(gap * 0.92, max(chars / 13.0, 1.2))
+        let weights = tokens.enumerated().map { Double($0.element.count + 1) * ($0.offset == tokens.count - 1 && tokens.count > 1 ? 1.6 : 1) }
+        let total = weights.reduce(0, +)
+        let span = max(end - start, 0.3)
         var t = start
-        return tokens.map { w in
-            let d = sung * Double(w.count + 1) / chars
+        return zip(tokens, weights).map { w, wt in
+            let d = span * wt / total
             defer { t += d }
-            return LyricWord(text: w, start: t, end: t + d)
+            return LyricWord(text: w, start: t, end: t + d, trailingSpace: true)
         }
     }
 }
@@ -229,14 +268,20 @@ final class TTMLParser: NSObject, XMLParserDelegate {
     private var words: [LyricWord] = []
     private var spanStack: [(begin: Double, end: Double, isBG: Bool)] = []
     private var text = ""
+    /// Text directly inside <p> (line-timed lyrics have no word spans).
+    private var pText = ""
     private var pendingSpace = false
+    /// Whether any line came without word timing (the lyrics are then line-synced).
+    private(set) var lineTimed = false
 
-    static func parse(_ ttml: String) -> [LyricLine]? {
+    static func parse(_ ttml: String) -> [LyricLine]? { parseDetailed(ttml)?.lines }
+
+    static func parseDetailed(_ ttml: String) -> (lines: [LyricLine], lineTimed: Bool)? {
         let p = TTMLParser()
         let x = XMLParser(data: Data(ttml.utf8))
         x.delegate = p
         guard x.parse() else { return nil }
-        return p.lines
+        return (p.lines, p.lineTimed)
     }
 
     static func time(_ s: String?) -> Double? {
@@ -254,7 +299,7 @@ final class TTMLParser: NSObject, XMLParserDelegate {
                 attributes a: [String: String] = [:]) {
         switch name {
         case "p":
-            inP = true; words = []; text = ""
+            inP = true; words = []; text = ""; pText = ""
             pStart = Self.time(a["begin"]) ?? 0; pEnd = Self.time(a["end"]) ?? pStart
         case "span" where inP:
             let role = a["ttm:role"] ?? a["role"] ?? ""
@@ -267,6 +312,7 @@ final class TTMLParser: NSObject, XMLParserDelegate {
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         guard inP else { return }
+        if spanStack.isEmpty { pText += string }
         if string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             // Whitespace between spans marks a word boundary.
             if text.trimmingCharacters(in: .whitespaces).isEmpty, !words.isEmpty { words[words.count - 1].trailingSpace = true }
@@ -300,7 +346,17 @@ final class TTMLParser: NSObject, XMLParserDelegate {
             if let i = words.lastIndex(where: { $0.text.hasPrefix("(") }), !words[words.count - 1].text.hasSuffix(")") , i >= 0 {
                 words[words.count - 1].text += ")"
             }
-            if words.isEmpty { return }
+            if words.isEmpty {
+                // Line-timed: we know when the line starts and when the singing ends, so
+                // the words are spread across that whole span (and wait for a slow singer).
+                let clean = pText.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+                guard !clean.isEmpty, pEnd > pStart else { return }
+                var ws = LyricsService.spreadWords(clean, from: pStart, to: pEnd)
+                if !ws.isEmpty { ws[ws.count - 1].trailingSpace = false }
+                lineTimed = true
+                lines.append(LyricLine(id: lines.count, start: pStart, end: pEnd, text: clean, words: ws, exactWords: false))
+                return
+            }
             if !words.isEmpty { words[words.count - 1].trailingSpace = false }
             let lineText = words.map { $0.text + ($0.trailingSpace ? " " : "") }.joined()
             lines.append(LyricLine(id: lines.count, start: words.first?.start ?? pStart, end: max(pEnd, words.last?.end ?? pEnd),

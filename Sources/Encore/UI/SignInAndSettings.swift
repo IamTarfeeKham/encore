@@ -386,15 +386,18 @@ struct SettingsView: View {
         case .lyrics:
             SettingsCard("Source") {
                 SettingsRow("Lyrics source") { PillMenu(selection: $prefs.lyricsSource, options: Prefs.LyricsSource.allCases.map { ($0, $0.rawValue) }) }
-                SettingsNote("Best available tries word-synced lyrics (Better Lyrics), then line-synced (LRCLIB), then YouTube Music's own. Only the song title, artist, album and length are sent.")
+                SettingsNote("Best available looks for lyrics timed word by word (Better Lyrics, KuGou, NetEase Cloud Music), so the highlight follows the singer, pauses and held notes included. Then it tries line-synced lyrics (Better Lyrics, LRCLIB), then YouTube Music's own. Only the song title, artist, album and length are sent.")
             }
             SettingsCard("Display") {
-                SettingsRow("Highlight") { PillPicker(selection: $prefs.lyricsStyle, options: Prefs.LyricsStyle.allCases.map { ($0, $0.rawValue, nil) }) }
+                SettingsRow("Highlight", detail: "Songs whose lyrics are only timed line by line light a whole line at a time, so the highlight never runs ahead of the singer.") { PillPicker(selection: $prefs.lyricsStyle, options: Prefs.LyricsStyle.allCases.map { ($0, $0.rawValue, nil) }) }
                 SettingsRow("Alignment") { PillPicker(selection: $prefs.lyricsAlign, options: [(.leading, "Left", "text.alignleft"), (.center, "Centre", "text.aligncenter")]) }
                 SettingsRow("Text size") {
                     HStack { Slider(value: $prefs.lyricsSize, in: 22...52, step: 1).frame(width: 240); Text("\(Int(prefs.lyricsSize)) pt").monospacedDigit().frame(width: 46) }
                 }
                 SettingsToggle("Glow on the word being sung", $prefs.lyricsGlow)
+                SettingsToggle("Letters rise as they're sung", $prefs.lyricsLift)
+                SettingsToggle("Sparkles on long notes", $prefs.lyricsParticles,
+                               detail: "Small soft sparkles drift up off notes the singer holds. Both of these stay off when Reduce Motion is on.")
                 SettingsToggle("Blur lines that aren't playing", $prefs.lyricsBlur)
             }
             SettingsCard("Now Playing view") {

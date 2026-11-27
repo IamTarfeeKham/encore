@@ -86,6 +86,10 @@ final class Prefs: ObservableObject {
     @Published var lyricsOffset: Double { didSet { d.set(lyricsOffset, forKey: "lyricsOffset") } }
     @Published var lyricsGlow: Bool { didSet { d.set(lyricsGlow, forKey: "lyricsGlow") } }
     @Published var lyricsBlur: Bool { didSet { d.set(lyricsBlur, forKey: "lyricsBlur2") } }
+    /// Letters float up as the voice reaches them, and stay up while the line plays.
+    @Published var lyricsLift: Bool { didSet { d.set(lyricsLift, forKey: "lyricsLift") } }
+    /// Small soft sparkles drift up off long, held notes.
+    @Published var lyricsParticles: Bool { didSet { d.set(lyricsParticles, forKey: "lyricsParticles") } }
 
     // Extensions
     @Published var sponsorBlock: Bool { didSet { d.set(sponsorBlock, forKey: "sponsorBlock") } }
@@ -172,6 +176,8 @@ final class Prefs: ObservableObject {
         lyricsOffset = n("lyricsOffset", 0)
         lyricsGlow = b("lyricsGlow", true)
         lyricsBlur = b("lyricsBlur2", false)
+        lyricsLift = b("lyricsLift", true)
+        lyricsParticles = b("lyricsParticles", true)
         sponsorBlock = b("sponsorBlock", true)
         sponsorCategories = d.stringArray(forKey: "sponsorCategories") ?? ["music_offtopic", "sponsor", "selfpromo", "interaction"]
         eqEnabled = b("eqEnabled", false)
@@ -210,7 +216,7 @@ final class Prefs: ObservableObject {
     }
     func resetLyrics() {
         lyricsSource = .auto; lyricsStyle = .wipe; lyricsAlign = .leading; lyricsSize = 30
-        lyricsOffset = 0; lyricsGlow = true; lyricsBlur = false
+        lyricsOffset = 0; lyricsGlow = true; lyricsBlur = false; lyricsLift = true; lyricsParticles = true
     }
 }
 
