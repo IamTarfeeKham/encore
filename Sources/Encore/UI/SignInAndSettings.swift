@@ -1,27 +1,40 @@
 import SwiftUI
 import WebKit
 
+/// A small card over the dimmed app (which stays visible behind it), not a full-window wall.
 struct SignInPrompt: View {
     @EnvironmentObject var model: AppModel
+    @State private var shown = false
     var body: some View {
+        let card = RoundedRectangle(cornerRadius: 22, style: .continuous)
         ZStack {
-            Rectangle().fill(.regularMaterial).ignoresSafeArea()
-            VStack(spacing: 18) {
-                Image(systemName: "music.note.house.fill")
-                    .font(.system(size: 54))
-                    .foregroundStyle(.linearGradient(colors: [.pink, .red], startPoint: .top, endPoint: .bottom))
-                Text("Sign in to YouTube Music").font(.system(size: 26, weight: .bold))
-                Text("Your library, playlists, likes and recommendations come from your own account.\nYour password is entered on Google's page and is never seen by this app.")
-                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
-                HStack {
-                    Button("Sign In…") { model.showSignIn = true }
-                        .buttonStyle(.borderedProminent).controlSize(.large)
-                    Button("Continue Without Signing In") { model.signedIn = nil }
-                        .buttonStyle(.bordered).controlSize(.large)
-                }
+            // Dims and blocks the app behind; signing in stays a choice made with the buttons.
+            Color.black.opacity(shown ? 0.35 : 0).ignoresSafeArea()
+                .contentShape(Rectangle()).onTapGesture {}
+            VStack(spacing: 0) {
+                AppMark(size: 56).padding(.bottom, 16)
+                Text("Sign in to YouTube Music").font(.system(size: 17, weight: .semibold))
+                Text("Bring your library, playlists and likes. You sign in on Google's own page, so Encore never sees your password.")
+                    .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6).padding(.bottom, 20)
+                Button { model.showSignIn = true } label: { Text("Sign In…").frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                Button { model.signedIn = nil } label: { Text("Not Now").frame(maxWidth: .infinity) }
+                    .buttonStyle(.borderless).controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+                    .padding(.top, 10)
             }
-            .padding(40)
+            .padding(.horizontal, 28).padding(.top, 30).padding(.bottom, 20)
+            .frame(width: 340)
+            .background(card.fill(.regularMaterial))
+            .overlay(card.strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.35), radius: 30, y: 12)
+            .scaleEffect(shown ? 1 : 0.96)
+            .opacity(shown ? 1 : 0)
         }
+        .onAppear { withAnimation(.easeOut(duration: 0.22)) { shown = true } }
     }
 }
 

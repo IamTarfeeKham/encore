@@ -62,7 +62,7 @@ struct ShelvesPage: View {
                         if let error {
                             ErrorView(message: error) { self.error = nil; reload += 1 }
                         } else {
-                            LoadingView()
+                            LoadingView(inset: false)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -284,9 +284,9 @@ struct ChipStyle: ButtonStyle {
                 .overlay(Capsule().strokeBorder(Color.white.opacity(hover ? 0.2 : 0.06), lineWidth: 0.6))
                 .cursorSheen(Capsule(), strength: selected ? 0.1 : 0.22)
                 .contentShape(Capsule())
-                .scaleEffect(configuration.isPressed ? 0.96 : (hover ? 1.02 : 1))
-                .animation(.spring(duration: 0.22, bounce: 0.3), value: hover)
-                .animation(.spring(duration: 0.18, bounce: 0.3), value: configuration.isPressed)
+                .scaleEffect(configuration.isPressed ? 0.97 : 1)
+                .animation(.easeOut(duration: 0.15), value: hover)
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
                 .onHover { hover = $0 }
         }
     }
@@ -719,7 +719,7 @@ struct SearchView: View {
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", songs = "Songs", videos = "Videos", albums = "Albums", artists = "Artists",
-             playlists = "Community Playlists", featured = "Featured Playlists", podcasts = "Podcasts"
+             playlists = "Community playlists", featured = "Featured playlists", podcasts = "Podcasts"
         var id: String { rawValue }
         var params: String? {
             switch self {
@@ -749,7 +749,7 @@ struct SearchView: View {
                     ErrorView(message: error) { self.error = nil }
                 } else if let results {
                     if filter == .all { allResults(results) } else { filtered }
-                } else { LoadingView() }
+                } else { LoadingView(inset: false) }
             }
             .pagePadding()
         }
@@ -921,7 +921,7 @@ struct SearchOverview: View {
 
     private var topSongsColumn: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Top Songs").font(.system(size: 22, weight: .bold))
+            Text("Top songs").font(.system(size: 22, weight: .bold))
             VStack(spacing: 2) {
                 ForEach(topSongs) { item in
                     TrackRow(item: item, showAlbum: false) { player.play(item) }
@@ -942,7 +942,7 @@ struct TopResultHero: View {
     var body: some View {
         let round = item.kind == .artist
         VStack(alignment: .leading, spacing: 16) {
-            Text("Top Result").font(.system(size: 22, weight: .bold))
+            Text("Top result").font(.system(size: 22, weight: .bold))
             VStack(alignment: .leading, spacing: 18) {
                 Artwork(url: (artist?.thumbnail ?? item.thumbnail).map { Thumbs.upscale($0, size: 600) },
                         cornerRadius: round ? 80 : 14, symbol: round ? "person.fill" : "music.note", size: 160)

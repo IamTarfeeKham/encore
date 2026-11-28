@@ -70,8 +70,7 @@ struct SpeedDialTile: View {
                             .padding(5).background(.black.opacity(0.35), in: Circle()).padding(6)
                     }
                 }
-                .scaleEffect(hover ? 1.04 : 1)
-                .shadow(color: .black.opacity(hover ? 0.3 : 0), radius: 12, y: 6)
+                .shadow(color: .black.opacity(hover ? 0.25 : 0), radius: 10, y: 4)
             Text(item.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
             Text(item.kind == .song || item.kind == .video ? item.artistLine : item.kind.rawValue.capitalized)
                 .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)

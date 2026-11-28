@@ -336,11 +336,10 @@ struct PlayButtonStyle: ButtonStyle {
             .foregroundStyle(Color.black)
             .background(Circle().fill(Color.white))
             .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.35), radius: hover ? 10 : 6, y: 3)
-            .shadow(color: .white.opacity(hover ? 0.35 : 0.15), radius: hover ? 14 : 8)
-            .scaleEffect(configuration.isPressed ? 0.9 : (hover ? 1.07 : 1))
-            .animation(.spring(duration: 0.25, bounce: 0.35), value: configuration.isPressed)
-            .animation(.spring(duration: 0.3, bounce: 0.3), value: hover)
+            .shadow(color: .black.opacity(hover ? 0.4 : 0.3), radius: hover ? 8 : 6, y: 3)
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.15), value: hover)
             .onHover { hover = $0 }
             .contentShape(Circle())
     }

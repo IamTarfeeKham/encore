@@ -103,7 +103,6 @@ struct CardView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
             }
-            .scaleEffect(hover ? 1.025 : 1)
             VStack(alignment: isRound ? .center : .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(item.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
@@ -302,7 +301,8 @@ struct TrackRow: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(isLiked ? Color.accentColor : .primary)
                         .frame(width: 26, height: 26)
-                        .opacity(isLiked ? 0.85 : 0.34)
+                        // Resting rows stay quiet: only a liked song keeps its thumb.
+                        .opacity(isLiked ? 0.85 : 0)
                 } else if let vid = item.videoId {
                     // Filled and in the accent colour when liked; tap again to unlike.
                     let isLiked = likes.liked.contains(vid)
@@ -319,7 +319,7 @@ struct TrackRow: View {
                     Color.clear.frame(width: 26, height: 26)
                 }
                 Text(duration.map(formatTime) ?? "")
-                    .font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.system(size: 12).monospacedDigit()).foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .frame(width: TrackRow.timeColumn, alignment: .center)
                 if hover {
@@ -331,7 +331,7 @@ struct TrackRow: View {
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 26, height: 26)
                 } else {
                     Image(systemName: "ellipsis").font(.system(size: 13))
-                        .frame(width: 26, height: 26).opacity(0.4)
+                        .frame(width: 26, height: 26).opacity(0)
                 }
             }
             .fixedSize()
@@ -340,10 +340,8 @@ struct TrackRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(isCurrent ? 0.1 : (hover ? 0.09 : 0)))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(hover || isCurrent ? 0.1 : 0), lineWidth: 0.5))
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(isCurrent ? 0.08 : (hover ? 0.06 : 0)))
         }
         // Hairline between rows (hidden under the hover/current highlight).
         .overlay(alignment: .bottom) {
@@ -595,15 +593,16 @@ struct MoodTile: View {
         return Color(red: Double((c >> 16) & 0xFF) / 255, green: Double((c >> 8) & 0xFF) / 255, blue: Double(c & 0xFF) / 255)
     }
     var body: some View {
-        HStack(spacing: 0) {
-            Rectangle().fill(color).frame(width: 6)
-            Text(item.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                .padding(.horizontal, 12)
-            Spacer(minLength: 0)
-        }
-        .frame(height: 46)
-        .background(hover ? Color.primary.opacity(0.16) : Color.primary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        // YouTube's colour for the mood as a muted wash over the whole tile.
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        Text(item.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .background(shape.fill(Color.primary.opacity(0.05)))
+            .background(shape.fill(color.opacity(hover ? 0.26 : 0.14)))
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+            .contentShape(shape)
+            .animation(.easeOut(duration: 0.15), value: hover)
         .contextMenu { ItemMenu(item: item) }
         .onHover { hover = $0 }
         .onTapGesture { model.open(item) }
@@ -612,9 +611,45 @@ struct MoodTile: View {
 
 // MARK: - Loading / error states
 
+/// A still outline of a page (a shelf, then rows) shown while it loads, so the
+/// layout doesn't jump from a lone spinner. Appears after a beat so quick loads don't flash.
 struct LoadingView: View {
+    /// Off when the parent already pads the page (title + LoadingView inside `.pagePadding()`).
+    var inset = true
+    @State private var shown = false
     var body: some View {
-        ProgressView().controlSize(.large).frame(maxWidth: .infinity, maxHeight: .infinity).padding(80)
+        let block = Color.primary.opacity(0.06)
+        VStack(alignment: .leading, spacing: 14) {
+            RoundedRectangle(cornerRadius: 5).fill(block).frame(width: 180, height: 18)
+            HStack(spacing: 16) {
+                ForEach(0..<5, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 8) {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(block).aspectRatio(1, contentMode: .fit)
+                        RoundedRectangle(cornerRadius: 4).fill(block).frame(height: 11).padding(.trailing, 30)
+                    }
+                }
+            }
+            .padding(.bottom, 18)
+            RoundedRectangle(cornerRadius: 5).fill(block).frame(width: 140, height: 18)
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 6).fill(block).frame(width: 40, height: 40)
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 4).fill(block).frame(width: 220, height: 11)
+                        RoundedRectangle(cornerRadius: 4).fill(block).frame(width: 140, height: 10)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal, inset ? 28 : 0).padding(.top, inset ? PageInsets.top : 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .opacity(shown ? 1 : 0)
+        .task {
+            try? await Task.sleep(for: .milliseconds(250))
+            withAnimation(.easeOut(duration: 0.2)) { shown = true }
+        }
+        .accessibilityLabel("Loading")
     }
 }
 

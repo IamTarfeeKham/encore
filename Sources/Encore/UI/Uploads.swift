@@ -92,7 +92,7 @@ struct UploadsView: View {
         } else if let error {
             ErrorView(message: error) { self.error = nil; reload += 1 }
         } else {
-            LoadingView().frame(maxWidth: .infinity).padding(.top, 40)
+            LoadingView(inset: false)
         }
     }
 
