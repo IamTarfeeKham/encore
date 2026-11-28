@@ -159,7 +159,7 @@ final class Prefs: ObservableObject {
         // Earlier versions had a lyrics on/off button; "off" was this artwork view.
         nowPlayingLayout = s("nowPlayingLayout", b("showLyrics", true) ? .lyrics : .artwork)
         artworkMotion = b("artworkMotion", true)
-        appIconSymbol = s("appIconSymbol", .note)
+        appIconSymbol = s("appIconSymbol", .spotlight)
         appIconStyle = s("appIconStyle", .automatic)
         lockScreenArtwork = b("lockScreenArtwork", true)
         glassMiniPlayers = b("glassMiniPlayers", true)

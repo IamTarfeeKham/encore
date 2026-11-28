@@ -91,10 +91,20 @@ struct AppMark: View {
                       : LinearGradient(colors: [.white, Color(white: 0.9)], startPoint: .top, endPoint: .bottom))
                 .overlay(RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
-            Image(systemName: "music.note")
-                .font(.system(size: size * 0.56, weight: .bold))
-                .foregroundStyle(Color(red: 1, green: 0, blue: 0))
-                .offset(x: -size * 0.02)
+            // The brand mark (as in the app icon): the e, its tail ending in the pink spotlight.
+            Canvas { ctx, sz in
+                let k = sz.width * 0.6 / 80   // the mark is ~80 units wide in the wordmark's units
+                ctx.translateBy(x: sz.width / 2, y: sz.height / 2 - 2 * k)
+                ctx.scaleBy(x: k, y: k)
+                ctx.translateBy(x: -62, y: -128)
+                var e = Path()
+                e.move(to: CGPoint(x: 30, y: 128)); e.addLine(to: CGPoint(x: 90, y: 128))
+                e.addArc(center: CGPoint(x: 60, y: 128), radius: 30, startAngle: .degrees(0), endAngle: .degrees(-320), clockwise: true)
+                ctx.stroke(e, with: .color(scheme == .dark ? .white : Color(white: 0.08)),
+                           style: StrokeStyle(lineWidth: 14, lineCap: .round, lineJoin: .round))
+                ctx.fill(Path(ellipseIn: CGRect(x: 82, y: 145.3, width: 20, height: 20)),
+                         with: .color(Color(red: 1, green: 0x45 / 255, blue: 0x79 / 255)))
+            }
         }
         .frame(width: size, height: size)
     }
@@ -104,7 +114,7 @@ struct AppLogo: View {
     var body: some View {
         HStack(spacing: 8) {
             AppMark(size: 24)
-            Text(AppInfo.name).font(.system(size: 14, weight: .bold)).tracking(-0.2).lineLimit(1)
+            Text(AppInfo.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
         }
         .fixedSize()
         .contentShape(Rectangle())

@@ -8,7 +8,7 @@ import CoreImage
 /// (scripts/make_icon.swift). The symbols are drawn here on a 100-unit grid (no SF
 /// Symbols: their licence doesn't allow them in app icons).
 enum IconSymbol: String, CaseIterable, Identifiable, Sendable {
-    case note = "Note", cutout = "Cut-out", wave = "Wave"
+    case spotlight = "Spotlight", note = "Note", cutout = "Cut-out", wave = "Wave"
     var id: String { rawValue }
 }
 
@@ -84,6 +84,17 @@ enum IconArt {
             }, S: S, top: p.glyphTop, bottom: p.glyphBottom)
         case .wave:
             art = glass(bg, mask: mask(S) { ctx, u in drawWave(ctx, u, S: S, scale: 1.1) }, S: S, top: p.glyphTop, bottom: p.glyphBottom)
+        case .spotlight:
+            // The brand mark: the e, its tail ending in the pink spotlight. Dark and light looks use the
+            // brand colours (white or ink e, pink spotlight); the others stay one colour, like macOS.
+            let pink = (c(0xff6a93), c(0xf23a6e)), ink = (c(0x2c2b30), c(0x151417)), white = (c(0xffffff), c(0xf1eeea))
+            let (e, dot): ((CGColor, CGColor), (CGColor, CGColor)) = switch look {
+                case .dark: (white, pink)
+                case .pearl: (ink, pink)
+                default: ((p.glyphTop, p.glyphBottom), (p.glyphTop, p.glyphBottom))
+            }
+            art = glass(bg, mask: mask(S) { ctx, u in drawSpotlightE(ctx, u, S: S) }, S: S, top: e.0, bottom: e.1)
+            art = glass(art, mask: mask(S) { ctx, u in drawSpotlightDot(ctx, u, S: S) }, S: S, top: dot.0, bottom: dot.1)
         }
         guard let artImage = ciContext.createCGImage(art, from: full, format: .RGBA8, colorSpace: cs) else { return nil }
         return tile(artImage, S: S, palette: p)
@@ -151,6 +162,28 @@ enum IconArt {
         f.addCurve(to: P(stemX + stemW, 74), control1: P(72, 62), control2: P(66, 70))
         f.closeSubpath()
         ctx.addPath(f); ctx.fillPath()
+    }
+
+    /// The Spotlight mark, drawn in the wordmark's own units (x-height 60, stroke 14, round ends)
+    /// around its centre (62, 128), y down, then scaled onto the grid.
+    private static func spotlightSpace(_ ctx: CGContext, _ u: CGFloat, S: CGFloat) {
+        let s = u * 1.14
+        ctx.translateBy(x: S / 2, y: S / 2 + 3 * s)   // optically a touch above centre
+        ctx.scaleBy(x: s, y: -s)
+        ctx.translateBy(x: -62, y: -128)
+    }
+    private static func drawSpotlightE(_ ctx: CGContext, _ u: CGFloat, S: CGFloat) {
+        ctx.saveGState(); spotlightSpace(ctx, u, S: S)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 30, y: 128)); path.addLine(to: CGPoint(x: 90, y: 128))
+        path.addArc(center: CGPoint(x: 60, y: 128), radius: 30, startAngle: 0, endAngle: -320 * .pi / 180, clockwise: true)
+        ctx.addPath(path.copy(strokingWithWidth: 14, lineCap: .round, lineJoin: .round, miterLimit: 10)); ctx.fillPath()
+        ctx.restoreGState()
+    }
+    private static func drawSpotlightDot(_ ctx: CGContext, _ u: CGFloat, S: CGFloat) {
+        ctx.saveGState(); spotlightSpace(ctx, u, S: S)
+        ctx.fillEllipse(in: CGRect(x: 92 - 10, y: 155.3 - 10, width: 20, height: 20))
+        ctx.restoreGState()
     }
 
     private static func drawWave(_ ctx: CGContext, _ u: CGFloat, S: CGFloat, scale: CGFloat = 1) {

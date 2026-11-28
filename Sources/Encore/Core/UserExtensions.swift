@@ -142,10 +142,17 @@ final class UserExtensions: ObservableObject {
 
         let store = JSValue(newObjectIn: ctx)!
         let key = "userExtension.\(id.uuidString)."
-        let get: @convention(block) (String) -> Any? = { k in UserDefaults.standard.object(forKey: key + k) }
+        // Stored as JSON text: UserDefaults rejects JSON's null (NSNull) and would crash the app.
+        // Values saved by older versions are plain objects and are still read as they are.
+        let get: @convention(block) (String) -> Any? = { k in
+            let stored = UserDefaults.standard.object(forKey: key + k)
+            guard let d = stored as? Data else { return stored }
+            return (try? JSONSerialization.jsonObject(with: d) as? [Any])?.first
+        }
         let set: @convention(block) (String, JSValue) -> Void = { k, v in
             if v.isUndefined || v.isNull { UserDefaults.standard.removeObject(forKey: key + k) }
-            else if let o = v.toObject(), JSONSerialization.isValidJSONObject([o]) { UserDefaults.standard.set(o, forKey: key + k) }
+            else if let o = v.toObject(), JSONSerialization.isValidJSONObject([o]),
+                    let d = try? JSONSerialization.data(withJSONObject: [o]) { UserDefaults.standard.set(d, forKey: key + k) }
         }
         store.setObject(get, forKeyedSubscript: "get" as NSString)
         store.setObject(set, forKeyedSubscript: "set" as NSString)

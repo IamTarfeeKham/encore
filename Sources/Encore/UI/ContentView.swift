@@ -561,7 +561,7 @@ struct EditSidebarView: View {
 
     /// Section label as a plain row (system section headers draw a grey strip).
     private func sectionHeader(_ t: String) -> some View {
-        Text(t.uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+        Text(t).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
             .padding(.leading, 8).padding(.top, 10).padding(.bottom, 2)
             .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
             .listRowSeparator(.hidden)

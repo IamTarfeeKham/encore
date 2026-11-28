@@ -445,7 +445,7 @@ struct ShelfView: View {
                 Artwork(url: thumb, cornerRadius: 20, aspect: 1).frame(width: 40, height: 40)
             }
             VStack(alignment: .leading, spacing: 1) {
-                if let s = shelf.strapline { Text(s.uppercased()).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary) }
+                if let s = shelf.strapline { Text(s).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary) }
                 if !shelf.title.isEmpty {
                     Text(shelf.title).font(.system(size: 22, weight: .bold)).lineLimit(1)
                 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds the app (Apple Silicon) into ./build.
 #
-#   ./build.sh                  build build/Encore.app
+#   ./build.sh                  build build.noindex/Encore.app (".noindex": Spotlight skips it)
 #   ./build.sh --run            build and open it
 #   ./build.sh --install        build and copy it to /Applications
 #   APP_NAME="My Name" ./build.sh --install   use a different app name
@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="${APP_NAME:-Encore}"
-APP="build/$APP_NAME.app"
+APP="build.noindex/$APP_NAME.app"
 ARCH="arm64"   # Apple Silicon only for now
 
 swift build -c release --arch "$ARCH"

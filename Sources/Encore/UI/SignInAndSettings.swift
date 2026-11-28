@@ -327,9 +327,15 @@ struct SettingsView: View {
                     }
                 }
                 SettingsRow("Glass transparency", detail: "How see-through every glass surface in the app is: sidebar, player bar, queue, Now Playing controls and menus.") {
-                    Slider(value: Binding(get: { 0.6 - prefs.glassTint }, set: { prefs.glassTint = 0.6 - $0 }), in: 0...0.6) { EmptyView() }
-                        minimumValueLabel: { Text("Solid") } maximumValueLabel: { Text("Clear") }
-                        .frame(width: 280)
+                    // End labels outside the slider: macOS tints a slider's own labels with the accent.
+                    HStack(spacing: 8) {
+                        Text("Solid").foregroundStyle(.secondary)
+                        Slider(value: Binding(get: { 0.6 - prefs.glassTint }, set: { prefs.glassTint = 0.6 - $0 }), in: 0...0.6)
+                            .labelsHidden()
+                        Text("Clear").foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 11))
+                    .frame(width: 280)
                 }
                 SettingsRow("Accent colour") {
                     HStack(spacing: 7) {
@@ -551,7 +557,7 @@ struct SettingsView: View {
                     Button("Sign In…") { model.showSignIn = true }
                 }
             }
-            SettingsCard("Privacy & Data") {
+            SettingsCard("Privacy & data") {
                 SettingsNote("Your password is only entered on Google's page. The app runs sandboxed, uses HTTPS only, and keeps listening stats on this Mac.")
                 ButtonRow {
                     Button {
@@ -586,8 +592,8 @@ struct SettingsCard<Content: View>: View {
     init(_ title: String, @ViewBuilder content: @escaping () -> Content) { self.title = title; self.content = content }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(title.uppercased())
-                .font(.system(size: 11, weight: .semibold)).tracking(0.6)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 6)
             Rectangle().fill(Color.primary.opacity(0.12)).frame(height: 0.5)
@@ -762,7 +768,7 @@ private struct AppIconSettings: View {
 
     var body: some View {
         let look = AppIcon.look(for: prefs.appIconStyle)
-        SettingsCard("App Icon") {
+        SettingsCard("App icon") {
             HStack(spacing: 14) {
                 ForEach(IconSymbol.allCases) { symbol in
                     let on = prefs.appIconSymbol == symbol

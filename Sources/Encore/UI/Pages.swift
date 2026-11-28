@@ -417,7 +417,7 @@ struct CollectionView: View {
             let meta = [p.subtitle, p.secondSubtitle].filter { !$0.isEmpty }.joined(separator: " · ")
             if !meta.isEmpty {
                 Text(meta).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
-                    .textCase(.uppercase).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             if let d = p.description, !d.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -591,7 +591,7 @@ struct ArtistView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     // Big display name that shrinks to fit long names / narrow windows.
                     Text(page.name)
-                        .font(.system(size: 92, weight: .black))
+                        .font(.system(size: 92, weight: .bold))
                         .tracking(-1.5)
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -886,9 +886,9 @@ struct SearchOverview: View {
                 ForEach(artist.shelves) { shelf in
                     if shelf.style == .list {
                         SongGrid(title: shelf.title.isEmpty ? "Popular" : shelf.title,
-                                 strapline: top.title.uppercased(), items: shelf.items, twoColumns: width > 900)
+                                 strapline: top.title, items: shelf.items, twoColumns: width > 900)
                     } else {
-                        ShelfView(shelf: Shelf(title: shelf.title, strapline: top.title.uppercased(), thumbnail: nil,
+                        ShelfView(shelf: Shelf(title: shelf.title, strapline: top.title, thumbnail: nil,
                                                style: shelf.style, items: shelf.items,
                                                moreBrowseId: shelf.moreBrowseId, moreParams: shelf.moreParams))
                     }

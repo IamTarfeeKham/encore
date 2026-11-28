@@ -491,7 +491,11 @@ final class PlayerController: ObservableObject {
         } else {
             if let orig = unshuffled, let cur = current, let pos = orig.firstIndex(of: cur) {
                 let played = Set(queue[...i].map(\.uid))
-                queue = Array(queue[...i]) + orig[(pos + 1)...].filter { !played.contains($0.uid) }
+                // Songs added while shuffled (Play Next, Add to Queue, more radio) aren't in
+                // the original order: keep them, after it.
+                let original = Set(orig.map(\.uid))
+                let added = queue[(i + 1)...].filter { !original.contains($0.uid) }
+                queue = Array(queue[...i]) + orig[(pos + 1)...].filter { !played.contains($0.uid) } + added
             }
             unshuffled = nil
             shuffle = false
@@ -858,7 +862,10 @@ final class PlayerController: ObservableObject {
     }
 
     func save() {
-        let s = Saved(queue: Array(queue.prefix(500)), index: index, time: clock.time, repeatMode: repeatMode)
+        // At most 500 songs, from a little before the current one, so it's always kept.
+        let from = min(max((index ?? 0) - 100, 0), max(queue.count - 500, 0))
+        let s = Saved(queue: Array(queue[from..<min(from + 500, queue.count)]), index: index.map { $0 - from },
+                      time: clock.time, repeatMode: repeatMode)
         if let d = try? JSONEncoder().encode(s) { UserDefaults.standard.set(d, forKey: "savedQueue") }
     }
 

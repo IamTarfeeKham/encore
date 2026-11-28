@@ -72,7 +72,7 @@
 - **Sidebar and player bar style.** With Liquid Glass, choose **Frosted** (a soft blur, the default) or **Liquid Glass** (clear and see-through).
 - **Smart empty background.** When nothing is playing, the background is built from your accent colour: a soft tint in light mode and a deep one in dark mode, so it suits whatever colour you pick.
 - **Layout.** A resizable, reorderable sidebar and rebindable keyboard shortcuts.
-- **App icon.** Choose Note, Cut-out or Wave in Settings › Appearance, in glass styles: Dark, Light, Clear (fully see-through Liquid Glass), Graphite or Red. **Automatic** (the default) matches macOS: light or dark mode, and the icon style in System Settings › Appearance (Default, Dark, Clear or Tinted, in your accent colour). The Dock shows your choice while the app is open.
+- **App icon.** The default is Spotlight: an *e* whose tail ends in a pink spotlight, from the Encore wordmark. Or choose Note, Cut-out or Wave in Settings › Appearance, in glass styles: Dark, Light, Clear (fully see-through Liquid Glass), Graphite or Red. **Automatic** (the default) matches macOS: light or dark mode, and the icon style in System Settings › Appearance (Default, Dark, Clear or Tinted, in your accent colour). The Dock shows your choice while the app is open.
 
 ### Updates
 
@@ -109,7 +109,7 @@ You need Xcode 16 or later (Xcode 26 for the Liquid Glass APIs), or the matching
 ```bash
 git clone <this repository>
 cd encore
-./build.sh --run        # builds build/Encore.app and opens it
+./build.sh --run        # builds build.noindex/Encore.app and opens it
 ./build.sh --install    # copies it to /Applications
 ```
 

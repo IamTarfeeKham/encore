@@ -146,9 +146,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             let u = Updater.shared
             guard u.pendingAutomatic, u.status == .available else { return .terminateNow }
+            // The updater lets the quit finish once the download is done and the helper has
+            // started (or the install stopped). The timer only stops a stuck download from
+            // holding the app open forever.
             u.installOnQuitIfPending()
-            // The helper takes over once it has started; give it a moment.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.reply(toApplicationShouldTerminate: true) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 120) { NSApp.reply(toApplicationShouldTerminate: true) }
             return .terminateLater
         }
     }

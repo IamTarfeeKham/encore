@@ -174,16 +174,31 @@ final class Updater: ObservableObject {
     /// From the quit path: if an automatic install is waiting, hand it to the helper
     /// (without reopening the app afterwards).
     func installOnQuitIfPending() {
-        guard pendingAutomatic, latest != nil, status != .installing else { return }
+        quitWaiting = true
+        guard pendingAutomatic, latest != nil, status != .installing else { endQuitWait(); return }
         install(relaunch: false)
+    }
+
+    /// The app's quit is on hold (`.terminateLater`) until the helper has started.
+    private var quitWaiting = false
+
+    /// Lets a held quit go ahead (once the helper has started, or the install stopped).
+    private func endQuitWait() {
+        guard quitWaiting else { return }
+        quitWaiting = false
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 
     // MARK: Installing
 
     func install(relaunch: Bool) {
         guard let release = latest, status != .installing else { return }
-        guard FileManager.default.fileExists(atPath: helperURL.path) else {
-            NSWorkspace.shared.open(release.page)   // e.g. a development build
+        // The helper only finds requests from (and only installs over) the standard bundle ID,
+        // so a build with its own BUNDLE_ID updates from the release page instead.
+        guard Bundle.main.bundleIdentifier == "local.ytmusicmac",
+              FileManager.default.fileExists(atPath: helperURL.path) else {
+            if !quitWaiting { NSWorkspace.shared.open(release.page) }   // e.g. a development build
+            endQuitWait()
             return
         }
         status = .installing
@@ -235,10 +250,11 @@ final class Updater: ObservableObject {
                 if relaunch {
                     try? await Task.sleep(nanoseconds: 700_000_000)   // let "Installing…" be seen
                     NSApp.terminate(nil)
-                } else { hideProgress() }
+                } else { hideProgress(); endQuitWait() }
             } catch {
                 hideProgress()
                 status = .failed("The update couldn't finish. \(error.localizedDescription)")
+                if quitWaiting { endQuitWait(); return }   // quitting: no alert, just let the app close
                 let alert = NSAlert()
                 alert.messageText = "The update couldn't finish"
                 alert.informativeText = error.localizedDescription + "\nNothing was changed. You can try again from Check for Updates."

@@ -10,7 +10,7 @@ struct UserExtensionsSettings: View {
     @State private var showingLog: UUID?
 
     var body: some View {
-        SettingsCard("Your Extensions") {
+        SettingsCard("Your extensions") {
             SettingsNote("Write or import small JavaScript extensions that react to songs and control the player: skip things, send songs to a web address, change the volume at night and more. They run in their own engine inside the app, with no access to your files. Only add code you trust.")
             ForEach($store.items) { $ext in
                 HStack(spacing: 10) {
